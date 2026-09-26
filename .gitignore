@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Data and model checkpoints (produced locally)
+/datasets
+/saved_models
+
+# Experiment outputs: everything under results/ is generated, except the plotting script
+results/*
+!results/plot.py
+
+# syntheval writes this at run time
+SE_config.json
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
