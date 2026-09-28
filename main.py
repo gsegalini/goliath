@@ -89,13 +89,13 @@ def main():
         type=str,
         default="midpoint",
         choices=["random", "midpoint"],
-        help="dummy_t init strategy: 'random' = uniform over [0,T), 'midpoint' = T//2",
+        help="dummy_t init strategy: 'random' = uniform over [0,T), 'midpoint' = T//2 (old default)",
     )
     parser.add_argument(
         "--t-lr-mult",
         type=float,
         default=None,
-        help="Timestep optimizer LR multiplier; defaults to 10.0",
+        help="Timestep optimizer LR multiplier; defaults to 10.0 (historical hardcoded value)",
     )
     parser.add_argument(
         "--noise-lr-mult",
@@ -115,24 +115,24 @@ def main():
     parser.add_argument("--no-align", help="whether to not use align in ensembling", action="store_true")
     parser.add_argument(
         "--reshuffle",
-        help="reshuffle the client's minibatch composition every epoch (breaks the fixed batch order the cross-epoch ensemble assumes)",
+        help="reshuffle the client's minibatch composition every epoch (breaks the fixed batch order the cross-epoch ensemble assumes; rebuttal 3.1 / 6bVX-Q3, esrr-Q3, 8B8y)",
         action="store_true",
     )
     parser.add_argument(
         "--global-ensemble",
-        help="order-invariant cross-epoch ensembling: blend each batch into the globally-matched pool entries instead of a fixed batch slot (robust to --reshuffle)",
+        help="order-invariant cross-epoch ensembling: blend each batch into the globally-matched pool entries instead of a fixed batch slot (reshuffle-robust; rebuttal 3.1)",
         action="store_true",
     )
     parser.add_argument(
         "--fedavg",
-        help="attack a per-client FedAvg weight update (K local SGD steps) instead of a single-batch gradient",
+        help="attack a per-client FedAvg weight update (K local SGD steps) instead of a single-batch gradient (rebuttal, per-client FedAvg setting)",
         action="store_true",
     )
     parser.add_argument("--fedavg-local-steps", type=int, default=2, help="K, number of local SGD steps per FedAvg update")
     parser.add_argument("--fedavg-local-lr", type=float, default=None, help="local SGD learning rate for the FedAvg update (defaults to --lr)")
     parser.add_argument(
         "--align-diagnostic",
-        help="also align each reconstruction with greedy fast-align AND Hungarian at eval time, logging both scores and their assignment disagreement",
+        help="also align each reconstruction with greedy fast-align AND Hungarian at eval time, logging both scores and their assignment disagreement (rebuttal 2.4)",
         action="store_true",
     )
     parser.add_argument(
@@ -164,7 +164,7 @@ def main():
         help="defense mechanism to use",
         choices=["clipping", "compression", "noise", "censor", "dp"],
     )
-    # Certified DP-SGD defense: per-example clip + calibrated Gaussian noise.
+    # Certified DP-SGD defense (rebuttal 8B8y-Q1): per-example clip + calibrated Gaussian noise.
     parser.add_argument("--dp-clip", type=float, default=1.0, help="DP-SGD per-example L2 clip norm C")
     parser.add_argument("--dp-epsilon", type=float, default=None, help="DP-SGD target epsilon (over --dp-steps); z is calibrated to it")
     parser.add_argument("--dp-delta", type=float, default=1e-5, help="DP-SGD target delta")
@@ -178,7 +178,7 @@ def main():
     )
     parser.add_argument(
         "--backbone", type=str, default="mlp", choices=["mlp", "ft-transformer"],
-        help="diffusion model backbone: mlp (default) or ft-transformer",
+        help="diffusion model backbone: mlp (default) or ft-transformer (rebuttal: architecture generalization)",
     )
     parser.add_argument(
         "--ft-init-std", type=float, default=1.0,
@@ -196,6 +196,9 @@ def main():
         default=0.0001,
         help="FT-Transformer training learning rate",
     )
+    # FT-Transformer capacity. On the corrected tokenizer, a three-seed Adult/batch-32 screen
+    # averaged 0.365 at 256x4 versus 0.339 at 64x2, at about 1.96x attack wall time. This is an
+    # empirical rebuttal configuration choice, not a claim that parameter count always helps.
     parser.add_argument(
         "--ft-analytic-weight", type=float, default=0.0,
         help="Weight of the FT-Transformer closed-form tokenizer constraint (batch 1 only, where "
@@ -206,8 +209,6 @@ def main():
         help="Seed the attack's dummy data at the FT-Transformer closed-form tokenizer solution "
              "(batch 1 only) instead of random init",
     )
-    # FT-Transformer capacity (d_model=256, 4 layers): chosen empirically on a small adult/batch-32
-    # screen; a larger backbone is not assumed to always help the attack.
     parser.add_argument("--ft-d-model", type=int, default=256, help="FT-Transformer token width")
     parser.add_argument("--ft-nhead", type=int, default=8, help="FT-Transformer attention heads")
     parser.add_argument("--ft-nlayers", type=int, default=4, help="FT-Transformer encoder layers")
@@ -232,7 +233,7 @@ def main():
         "--warm-data",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="warm-start dummy data from previous epoch's blended reconstruction (equivalent to --init-strategy=previous). On by default for multi-epoch attacks.",
+        help="warm-start dummy data from previous epoch's blended reconstruction (equivalent to --init-strategy=previous). On by default to match prior multi-epoch behavior.",
     )
     parser.add_argument(
         "--warm-latents",
@@ -269,7 +270,7 @@ def main():
     )
     parser.add_argument(
         "--debug-prior",
-        help="Log per-iter prior / grad-match trace CSVs under save_dir to debug the mask prior",
+        help="Log per-iter prior / grad-match trace CSVs under save_dir for mask-prior investigation",
         default=False,
         action=argparse.BooleanOptionalAction,
     )
@@ -303,7 +304,7 @@ def main():
 
         values = params[args.experiment]
         counter = 0
-        to_skip = 0  # number of leading configs to skip, e.g. to resume an interrupted experiment
+        to_skip = 0  # change this to skip already done experiments
         for dataname, timesteps, batch_sz, epochs, run, (t, noise), extra_args in values:
             if counter < to_skip:
                 counter += 1
@@ -328,18 +329,17 @@ def main():
             args.no_noise = not noise
 
             if args.subset_size is None:
+                # if batch_sz <= 8:
                 args.subset_size = batch_sz * 100
-            if getattr(args, "fixed_subset", False):
-                # --experiment runs draw a fresh random data subset each time, while manual runs use
-                # the fixed random_state=42 subset (src/train_diffusion.py keys this on
-                # args.experiment). Clearing it makes the run identical to the manual command.
-                args.experiment = None
 
             if args.save_model:
                 args.batch_sz = 1024
                 args.attack = False
                 args.baseline = None
             train_diffusion_main(args)
+        # notify on completion
+        import requests
+        requests.post("https://ntfy.sh/GOLIATH-experiments-83464", data=f"Experiment {args.experiment} completed".encode(encoding='utf-8'))
     else:
         if args.save_model:
             args.batch_sz = 1024

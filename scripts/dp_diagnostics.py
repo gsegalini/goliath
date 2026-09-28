@@ -1,11 +1,10 @@
-"""DP-SGD defense diagnostics: validate the mechanism, the accountant, and the
+"""DP-SGD defense diagnostics (rebuttal 8B8y-Q1): validate the mechanism, the accountant, and the
 calibration of the clip norm C against actual per-example gradient norms.
 
 Checks:
   A1  per-example gradient L2 norm distribution at the attack point (random-init model, epoch-1
-      subset, training latent distribution) and after ~200 undefended Adam steps. Calibrates the
-      clip norm C (standard practice: C ~= median per-example norm; see _dp_clip_cal in
-      experiments/params.py).
+      subset, training latent distribution) and after ~200 undefended Adam steps. Drives the
+      "is C=1.0 realistic" decision (standard practice: C ~= median per-example norm).
   A2  released-gradient SNR per noise multiplier z: ||mean clipped grad|| vs ||noise||/B, empirical
       and analytic (sqrt(P)*z*C/B); reports the z* where SNR=1.
   A3  mechanism equivalence: dp_sgd_gradient(z=0, C=huge) must equal the plain autograd gradient of
@@ -36,7 +35,7 @@ from src.defense import dp_sgd_gradient
 from src.dp_accountant import analytic_gaussian_epsilon, rdp_to_epsilon, get_noise_multiplier, get_epsilon
 
 Z_GRID = [0.003, 0.01, 0.03, 0.07, 0.15, 0.3, 0.69]
-REGIMES = [(1, 64), (256, 1024)]  # (batch_sz, subset): batch-1 attack regime and a batch-256 regime
+REGIMES = [(1, 64), (256, 1024)]  # (batch_sz, subset) mirroring dp-defense-b1 / dp-defense
 
 
 def make_args(dataname, subset_size, dp_clip=1.0):
@@ -158,9 +157,9 @@ def check_a1_a2(datasets, seeds, device, csv_path):
             if r["batch"] == 1 and r["state"] == "init"}
     print("\n[A1 decision] batch-1 random-init medians:", {k: round(v, 3) for k, v in meds.items()})
     if all(0.5 <= m <= 2.0 for m in meds.values()):
-        print("[A1 decision] C=1.0 is within 2x of every median per-example norm -> C=1.0 is calibrated.")
+        print("[A1 decision] C=1.0 is within 2x of every median per-example norm -> NO re-runs needed.")
     else:
-        print("[A1 decision] C=1.0 is MISCALIBRATED for at least one dataset -> use a per-dataset C.")
+        print("[A1 decision] C=1.0 is MISCALIBRATED for at least one dataset -> re-run with calibrated C.")
     return rows
 
 

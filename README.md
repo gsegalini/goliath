@@ -79,12 +79,14 @@ experiment again therefore adds an independent seed.
 | `save-model` → `gidm-baseline` | GIDM baseline (`save-model` must run first; it pre-trains the models GIDM needs) |
 | `tableak-baseline`, `tableak-baseline-1`, `tableak-adaptive` | TabLeak baseline, and TabLeak with latent optimization |
 | `leakage-metrics` | per-cardinality, per-column, whole-row and re-identification leakage |
-| `census-cardinality`, `accuracy-epochX-census`, `accuracy-epochX-census-b18` | high-cardinality census dataset |
+| `census-cardinality`, `accuracy-epochX-census`, `accuracy-epochX-census-b18`, `accuracy-epochX-census-b16` | high-cardinality Census dataset |
 | `align-diagnostic` | greedy vs Hungarian alignment on the same reconstructions |
 | `reshuffle` | robustness to per-epoch reshuffling |
 | `fedavg`, `fedavg-masked` | per-client FedAvg updates with K local steps |
 | `ft-transformer-v2` | FT-Transformer backbone (run through `scripts/run_ft_v2_auto_seed.sh`) |
 | `scalability` | time and memory vs batch size |
+
+To fill the Census column in the main accuracy tables, run `uv run scripts/run_census_missing.py`. It runs the batch-16 five-epoch cell and the Census baselines at batch sizes 1, 8, 16, and 32. The runner skips complete cells and stops on partial ones; use `--goliath-only`, `--baselines-only`, or `--gidm-only` to run one group. GIDM requires a pretrained Census checkpoint, which the runner creates when needed.
 
 `scripts/reproduce_all.sh` runs the experiments behind the tables, cheapest first, and logs each
 run to `results/repro_logs/`:

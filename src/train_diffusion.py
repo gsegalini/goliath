@@ -174,9 +174,10 @@ def _evaluate_reconstruction(
         matcher.update_numeric_std(prepper.numeric_std)
         _, new_indices = matcher.row_matching(original, inverted)
 
-        # Alignment-bias diagnostic: align the SAME reconstruction with the greedy fast-align
-        # heuristic as well as optimal Hungarian matching, and record the score gap plus the
-        # fraction of rows the two assign differently. Cheap relative to the inversion itself.
+        # Alignment-bias diagnostic (2.4 / 8B8y-Q4): align the SAME reconstruction with the
+        # greedy fast-align heuristic as well as optimal Hungarian, and record the score gap
+        # plus the fraction of rows the two assign differently. Runs once per inversion (the
+        # expensive part is the inversion itself, not the assignment).
         greedy_score = None
         align_disagreement = None
         if getattr(args, "align_diagnostic", False) and not suffix:
@@ -201,8 +202,8 @@ def _evaluate_reconstruction(
                 performance_manager.log_metric("dcr", dcr)
                 performance_manager.log_metric("nndr", nndr)
 
-                # Fine-grained leakage breakdowns: per-cardinality, per-column, whole-row and
-                # re-identification. Computed on the aligned (inverted, original) pair. Per-dataset CSVs keep column
+                # Rebuttal breakdowns (2.1 per-cardinality, 2.2 per-column, 2.3 whole-row + re-id).
+                # Computed on the aligned (inverted, original) pair. Per-dataset CSVs keep column
                 # sets consistent, so per-column scores go into the main CSV with a `pcol_` prefix.
                 detail = tableak_evaluator.detailed_similarity(inverted, original)
                 performance_manager.log_metric("tableak_cat_high_score", detail["cat_high_score"])
@@ -268,7 +269,7 @@ def main(args):
     tableak_evaluator = TableakSimilarity(prepper)
 
     # shuffle=True reshuffles minibatch composition every epoch, so batch slot i holds different
-    # rows each round -- this is what breaks the cross-epoch ensemble's slot-based blending.
+    # rows each round -- this is what breaks the cross-epoch ensemble's slot-based blending (3.1).
     # The per-batch (single-epoch) attack is unaffected; only the multi-epoch enhancement assumes
     # fixed order.
     train_loader = DataLoader(
@@ -327,7 +328,7 @@ def main(args):
                 )
 
             elif args.attack:
-                # Per-batch attack
+                # Per-batch attack (original flow)
                 _log_common_metrics(performance_manager, args, attack, epoch, full_dataset_attack=False)
 
                 if getattr(args, "fedavg", False):
@@ -357,9 +358,10 @@ def main(args):
             if getattr(args, "defended_training", False) and args.defense:
                 # Pay the defense's utility cost: the client STEPS on the same defended gradient it
                 # would release. Without this flag `_apply_defense` only builds the attacker's view
-                # and `p.grad` is left untouched, so every defense would look free.
+                # and `p.grad` is left untouched, so every defense looks free (see TODO.md).
                 # Note: with --attack this re-draws the DP noise, so the released and stepped-on
-                # gradients differ. Intended for utility runs (--no-attack).
+                # gradients differ. Intended for utility runs (--no-attack), which is what the
+                # `dp-utility` experiment uses.
                 defended = _apply_defense(
                     args,
                     [p.grad.detach().clone() if p.grad is not None else None for p in model.parameters()],
@@ -459,7 +461,7 @@ def evaluate_attack_fedavg(
     prepper, n_cats_info, tableak_evaluator, performance_manager, device,
 ):
     """Per-client FedAvg attack: run K local SGD steps on the batch to produce a weight delta,
-    restore the model to the pre-update weights, and invert the delta."""
+    restore the model to the pre-update weights, and invert the delta (rebuttal FedAvg setting)."""
     K = int(getattr(args, "fedavg_local_steps", 2))
     local_lr = float(getattr(args, "fedavg_local_lr", None) or getattr(args, "_model_lr", args.lr))
     param_list = list(model.parameters())
@@ -515,7 +517,7 @@ def evaluate_attack(
     # send latest gradient to attack process
     grads = [p.grad.detach() if p.grad is not None else None for p in model.parameters()]
     grads = _apply_defense(args, grads, model, ground_truth, latents, diffusion_process, ground_truth.device)
-    # print ground-truth latents (mask-verbose only)
+    # print dummy latents (mask-verbose only)
     if args.mask_verbose and isinstance(diffusion_process, MaskedDiffusionProcess):
         tqdm.write(
             f"t = {latents['t'].numpy(force=True).tolist()}\nmask = {latents['mask'].int().numpy(force=True).tolist()}"
@@ -549,8 +551,9 @@ def evaluate_attack(
                 model_pretrained = build_diffusion_model(checkpoint["model_config"]).to(grads[0].device)
                 model_pretrained.load_state_dict(checkpoint["state_dict"])
             else:
-                # Fallback for legacy checkpoints saved as raw MLP state dicts (no architecture
-                # tag); new checkpoints use the self-describing format above.
+                # Existing rebuttal GIDM checkpoints predate architecture-tagged checkpoint
+                # packages. They are raw MLP state dicts; keep them usable without retraining
+                # nine datasets while new checkpoints use the self-describing format above.
                 legacy_path = os.path.join(
                     models_dir,
                     f"{args.diffusion_type}_model_pretrained.pt",

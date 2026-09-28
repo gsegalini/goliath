@@ -1,7 +1,7 @@
 """Data-integrity checks, run before any table is emitted.
 
-Each check guards against a data problem that would otherwise silently produce a wrong number:
-fail loudly instead of publishing a quietly-skewed mean.
+Each check corresponds to something that silently produced a wrong number during the rebuttal.
+The point is to fail loudly instead of publishing a quietly-skewed mean.
 """
 from __future__ import annotations
 
@@ -14,10 +14,11 @@ from analysis import loaders as L
 REQUIRED = {
     "fedavg": None,
     "fedavg-masked": None,
-    "leakage-metrics": None,
+    "rebuttal-metrics": None,
     "accuracy-epochX": None,
     "accuracy-epochX-census": 500,
     "accuracy-epochX-census-b18": 250,
+    "accuracy-epochX-census-b16": 500,
     "census-cardinality": 32,
     "tableak-adaptive": None,
     "reshuffle": None,
@@ -26,9 +27,10 @@ REQUIRED = {
     "dp-utility-c": None,
     "interepoch": None,
     "align-diagnostic": None,
-    # expected=None on purpose: the tables use the loss_fn="auto" cells only
-    # (analysis/tables._ft_cells), and an interrupted shard can leave per-cell counts that are
-    # not a multiple of the run length.
+    # expected=None on purpose: the committed sweep is loss_fn="auto" only and its per-cell
+    # counts are uneven (adult batch 32 has 49 rows, not a multiple of 20 -- an interrupted
+    # shard from the original run). analysis/tables._ft_cells pins loss_fn="auto"; see the
+    # "Known gaps" section of REPRODUCE.md.
     "ft-transformer-v2": None,
     "random-baseline": None,
 }
@@ -70,13 +72,13 @@ def check() -> list[str]:
 
     # seed-run counts: an appended run should be noticed, not silently averaged in
     try:
-        rm = L.load_experiment("leakage-metrics")
+        rm = L.load_experiment("rebuttal-metrics")
         for ds, cell in rm.groupby("dataname"):
-            for b, rpr in L.ROWS_PER_RUN_LEAKAGE_METRICS.items():
+            for b, rpr in L.ROWS_PER_RUN_REBUTTAL_METRICS.items():
                 g = cell[(cell.batch_size == b) & (cell.diffusion_type == "gaussian")]
                 if len(g) and len(g) % rpr:
                     problems.append(
-                        f"leakage-metrics {ds} batch {b}: {len(g)} rows is not a multiple of "
+                        f"rebuttal-metrics {ds} batch {b}: {len(g)} rows is not a multiple of "
                         f"{rpr} (rows per seed run) -- partial run present"
                     )
     except FileNotFoundError:

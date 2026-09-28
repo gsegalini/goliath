@@ -83,7 +83,7 @@ class Matcher:
         Repeatedly picks the global-minimum-cost (target, recon) pair, then masks its row
         and column. Returns (row_ind, col_ind) with row_ind = arange(N) and col_ind[i] the
         recon row assigned to target i -- same interface as row_matching. Mirrors the greedy
-        `fast_align` heuristic used in ensembling, for the alignment-bias diagnostic.
+        `fast_align` heuristic used in ensembling, for the alignment-bias diagnostic (2.4).
         """
         cost = np.array(self.cost_matrix(target_batch, to_change), dtype=np.float64, copy=True)
         n_rows, n_cols = cost.shape

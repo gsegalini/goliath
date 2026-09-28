@@ -8,8 +8,9 @@ Two ways to count, in order of preference:
 
 1. **The `seed` column.** `--experiment` sets `seed = -1`, which `main.py` resolves to a fresh
    random seed and logs. Distinct values in a cell = distinct runs. This is exact and needs no
-   knowledge of the protocol. Rows with no logged seed (NaN) count as one run.
-2. **Row stride**, for experiments whose CSVs have no `seed` column. One run writes
+   knowledge of the protocol. Rows written before seed logging existed are NaN and count as one
+   legacy run.
+2. **Row stride**, for the older experiments with no `seed` column. One run writes
    `subset_size / batch * epochs` rows, and `subset_size` is NOT logged (see loaders.py), so the
    divisor must be declared in ROWS_PER_RUN below and kept in sync with experiments/params.py.
 
@@ -30,7 +31,7 @@ from analysis import loaders as L
 # Fallback divisors, used only for experiments with no `seed` column.
 # int   -> same for every batch;  dict -> per batch size
 ROWS_PER_RUN: dict[str, object] = {
-    "leakage-metrics": {1: 32, 8: 16, 32: 8},  # subset/batch, _lm_batch_subset = [(1,32),(8,128),(32,256)]
+    "rebuttal-metrics": {1: 32, 8: 16, 32: 8},  # subset/batch, _rm_batch_subset = [(1,32),(8,128),(32,256)]
     "reshuffle": 50,
     "tableak-adaptive": {1: 60, 8: 30, 16: 30, 32: 30},  # subset = max(batch*30, 60)
     "align-diagnostic": {8: 8, 32: 4, 128: 2, 256: 2},  # subset/batch, subset = 256
@@ -46,6 +47,7 @@ SEED_COLUMN_EXPERIMENTS = [
     "dp-defense-eps-c",
     "accuracy-epochX-census",
     "accuracy-epochX-census-b18",
+    "accuracy-epochX-census-b16",
 ]
 
 ALL = list(ROWS_PER_RUN) + SEED_COLUMN_EXPERIMENTS
@@ -62,12 +64,12 @@ CELL_KEYS: dict[str, list[str]] = {
 DEFAULT_CELL_KEY = ["dataname", "batch_size", "diffusion_type"]
 
 # How to add one more seed. `--experiment` sets seed = -1, so re-invoking appends an independent
-# run. ft-transformer-v2 uses a script that runs only the loss_fn="auto" cells the tables read.
+# run -- except where noted.
 RERUN: dict[str, str] = {
-    "leakage-metrics": "uv run main.py --experiment leakage-metrics",
+    "rebuttal-metrics": "uv run main.py --experiment rebuttal-metrics",
     "reshuffle": "uv run main.py --experiment reshuffle",
     "tableak-adaptive": "uv run main.py --experiment tableak-adaptive",
-    "ft-transformer-v2": "bash scripts/run_ft_v2_auto_seed.sh abalone adult bean credit default gesture letter magic shoppers",
+    "ft-transformer-v2": "bash scripts/run_ft_v2_auto_seed.sh <dataset>   # NOT --experiment",
     "fedavg": "uv run main.py --experiment fedavg",
     "fedavg-masked": "uv run main.py --experiment fedavg-masked",
     "census-cardinality": "uv run main.py --experiment census-cardinality",

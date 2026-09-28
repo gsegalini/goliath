@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# Re-run the experiments behind the paper's tables, then build them with `uv run analysis/build.py`.
+# Re-run the experiments behind the paper's tables. See REPRODUCE.md.
 #
 #   bash scripts/reproduce_all.sh                       # everything, cheapest first
 #   bash scripts/reproduce_all.sh --only fedavg reshuffle
 #   bash scripts/reproduce_all.sh --smoke               # tiny config per path, just checks it runs
 #   bash scripts/reproduce_all.sh --list
+#
+# You do NOT need this to rebuild the paper: the results are committed and
+# `uv run analysis/build.py` regenerates every table and figure from them.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 # Cheapest first, so a broken path fails fast rather than 20 hours in.
-# Repeated entries are intentional: each invocation appends one independently seeded run, and the
-# paper reports census-cardinality over 2 runs, leakage-metrics as mean +- std over 3 runs, and
-# ft-transformer-v2 over 2 runs.
+# rebuttal-metrics appears 3x on purpose: the paper reports mean +- std over 3 appended seed runs.
 EXPERIMENTS=(
   align-diagnostic
-  census-cardinality
-  census-cardinality
   fedavg
   fedavg-masked
   reshuffle
@@ -24,20 +23,14 @@ EXPERIMENTS=(
   dp-utility-c
   accuracy-epochX-census-b18
   accuracy-epochX-census
-  leakage-metrics
-  leakage-metrics
-  leakage-metrics
+  rebuttal-metrics
+  rebuttal-metrics
+  rebuttal-metrics
   tableak-adaptive
   random-baseline
   interepoch
-  ft-transformer-v2
-  ft-transformer-v2
   accuracy-epochX
 )
-
-# ft-transformer-v2 is run through scripts/run_ft_v2_auto_seed.sh, which runs only the
-# loss_fn="auto" cells the tables read (one seed per invocation).
-FT_DATASETS=(abalone adult bean credit default gesture letter magic shoppers)
 
 LOG_DIR="results/repro_logs"
 ONLY=(); SMOKE=0
@@ -50,16 +43,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-run_one() {
-  if [[ $SMOKE -eq 1 ]]; then
-    # one tiny config: proves the code path runs without spending hours on it
-    uv run main.py --dataname adult --attack --batch_sz 8 --epochs 1 --timesteps 500 \
-      --subset-size 16 --optim_iters 30 --skip_eval --save-dir results/tests/smoke_repro
-    return
-  fi
+# census-cardinality and ft-transformer-v2 are not plain --experiment runs; see REPRODUCE.md.
+run_special() {
   case "$1" in
-    ft-transformer-v2) bash scripts/run_ft_v2_auto_seed.sh "${FT_DATASETS[@]}" ;;
-    *) uv run main.py --experiment "$1" ;;
+    census-cardinality)
+      for i in 1 2; do
+        uv run main.py --dataname census --attack --batch_sz 1 --epochs 1 --timesteps 500 \
+          --subset-size 32 --seed -1 --save-dir results/census-cardinality/census || return 1
+      done ;;
+    *) return 127 ;;
   esac
 }
 
@@ -73,9 +65,18 @@ for exp in "${TARGETS[@]}"; do
   echo ">>> $exp  ($(date '+%F %T'))  -> $log"
   t0=$(date +%s)
 
-  run_one "$exp" >>"$log" 2>&1
-  rc=$?
+  if [[ $SMOKE -eq 1 ]]; then
+    # one tiny config: proves the code path runs without spending hours on it
+    uv run main.py --dataname adult --attack --batch_sz 8 --epochs 1 --timesteps 500 \
+      --subset-size 16 --optim_iters 30 --skip_eval --save-dir results/tests/smoke_repro \
+      >>"$log" 2>&1
+  elif run_special "$exp" >>"$log" 2>&1; then
+    :
+  elif [[ $? -eq 127 ]]; then
+    uv run main.py --experiment "$exp" >>"$log" 2>&1
+  fi
 
+  rc=$?
   dt=$(( $(date +%s) - t0 ))
   if [[ $rc -ne 0 ]]; then
     echo "    FAILED (rc=$rc) after ${dt}s -- see $log"
@@ -91,5 +92,5 @@ if [[ ${#failed[@]} -gt 0 ]]; then
   echo "failed: ${failed[*]}"
   exit 1
 fi
-echo "Now build the tables and figures:"
-echo "  uv run analysis/build.py"
+echo "Now verify the numbers still reproduce:"
+echo "  uv run analysis/build.py --check"

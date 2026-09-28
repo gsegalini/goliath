@@ -266,7 +266,7 @@ def process_australia():
     data_df["date"] = pd.to_datetime(data_df["Quarter"])
     data_df["year"] = data_df["date"].dt.year
     data_df["month"] = data_df["date"].dt.month
-    # the day is dropped: it is always the first of the month in this dataset
+    """Ignore the day bcs it is always the first day of the month for this dataset"""
     data_df = data_df.drop(columns=['Unnamed: 0', 'date', 'Quarter'])
     data_df.to_csv(save_path, index=False)
 
@@ -286,9 +286,9 @@ def process_credit():
 def process_census():
     """Census-Income (KDD): 34 categorical + 7 continuous columns.
 
-    A many-category table: adult, the most categorical of the other datasets, has 9 categorical
-    columns and 3 with cardinality >= 10, whereas this has 34 and 10 (up to 51 levels). Same
-    census/income domain, so it reads as adult scaled up.
+    Added for the rebuttal to answer the "many-category tables" weakness: adult, our most
+    categorical dataset, has 9 categorical columns and 3 with cardinality >= 10, whereas this
+    has 34 and 10 (up to 51 levels). Same census/income domain, so it reads as adult scaled up.
 
     The UCI zip contains a tarball, not the data directly. `.data` and `.test` are the
     publisher's split of one population; we concatenate and let train_test_split() re-split,
@@ -330,7 +330,7 @@ def train_test_split(dataname, ratio=0.7):
     seed = 42
 
     np.random.seed(seed)
-    # don't shuffle australia: it is a time series
+    # don't shuffle for australia bcs it is a time series
     shuffled_ids = np.random.permutation(np.arange(total_num)) if dataname != 'australia' else np.arange(total_num)
 
     train_idx = shuffled_ids[:num_train]
@@ -351,19 +351,11 @@ def train_test_split(dataname, ratio=0.7):
 
 
 if __name__ == "__main__":
+    # Downloading dataset
     for name in NAME_URL_DICT_UCI.keys():
-        # australia has no direct download URL; it needs the Kaggle archive placed manually.
-        if (
-            name == "australia"
-            and not os.path.exists(f"{DATA_DIR}/archive.zip")
-            and not os.path.exists(f"{DATA_DIR}/australia/tourism.csv")
-        ):
-            print(
-                f"Skipping australia: {DATA_DIR}/archive.zip not found. Download it from "
-                "https://www.kaggle.com/datasets/luisblanche/quarterly-tourism-in-australia "
-                f"and place it in {DATA_DIR}/ to include this dataset."
-            )
-            continue
         download_from_uci(name)
         globals()[f"process_{name}"]()
+
+    for name in NAME_URL_DICT_UCI.keys():
+        eval(f"process_{name}()")
         train_test_split(name, ratio=0.7)

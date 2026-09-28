@@ -1,5 +1,8 @@
 """Camera-ready figures: one per experiment that appears in the paper.
 
+Replaces results/plot_rebuttal.py, which read only 5 experiment dirs and pointed at the superseded
+`dp-defense` (batch 256, C=1.0) rather than the published `dp-defense-b1-c`.
+
 Styling matches results/plot.py (seaborn colorblind, darkgrid, font_scale 1.3, pdf.fonttype 42 so
 fonts embed as Type 42 rather than Type 3). Every figure is written as BOTH .pdf (for
 \\includegraphics) and .svg (for quick viewing).
@@ -155,7 +158,7 @@ def fig_contraction() -> None:
 # ── Cardinality: accuracy by bin, and how it degrades with batch ────────────
 def fig_cardinality() -> None:
     try:
-        df = L.load_experiment("leakage-metrics")
+        df = L.load_experiment("rebuttal-metrics")
     except FileNotFoundError as e:
         return _skip("cardinality", str(e))
     fig, ax = plt.subplots(figsize=(6, 4))

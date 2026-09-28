@@ -22,7 +22,7 @@ class Attack:
         self.criterion = nn.MSELoss()
         self.N = args.pool_size
         self.matcher = Matcher(prepper.cat_cols, prepper.num_cols)
-        self.matcher.update_numeric_std(prepper.numeric_std)  # numeric tolerances assume the per-column std is known
+        self.matcher.update_numeric_std(prepper.numeric_std)  # TODO: maybe remove this as it's not very realistic
 
         self.prepper = prepper
         self.diffusion_process = diffusion_process
@@ -36,7 +36,7 @@ class Attack:
         self.alignment_anchors = []  # used for alignment across epochs
         self.latest_latents = []  # warm-start latents when init_strategy resolves to "previous"
         self.epoch_lr = args.attack_epoch_lr
-        # Blend weight decays linearly from attack_epoch_lr to 0 over args.epochs.
+        # linear schedule in args.epoch steps from epoch_lr
         self.epoch_lr_schedule = self.epoch_schedule(args.attack_epoch_lr, args.epochs, args.attack_epoch_lr_schedule)
 
         self.loss_fn = getattr(args, 'loss_fn', 'both')
@@ -117,10 +117,11 @@ class Attack:
         ):
             self._effective_loss_fn = "both"
 
-        # Baseline guard. The TabLeak baseline (including the "adaptive" variant that
-        # optimizes t/noise) must not use GOLIATH's table-aware EMA loss or the mask<->t
-        # coupling prior. Neither is gated on t/noise optimization, so block them here
-        # rather than rely on configuration. (Cross-epoch ensembling needs no guard: train_diffusion.py breaks the
+        # Baseline differentiation guard. The TabLeak baseline (including the "adaptive"
+        # variant that optimizes t/noise) must stay strictly weaker than GOLIATH: it may
+        # NOT use the table-aware EMA loss or the mask<->t coupling prior. Neither is gated
+        # on t/noise optimization, so we hard-block them here rather than rely on config
+        # discipline. (Cross-epoch ensembling needs no guard: train_diffusion.py breaks the
         # tableak run after a single epoch, so it can never execute regardless of --epochs.)
         if getattr(args, "baseline", None) == "tableak":
             if self.loss_fn not in ("cossim", "mse"):
@@ -188,6 +189,7 @@ class Attack:
         self.epoch_ix += 1
         if self.args.verbose:
             tqdm.write(f"Attack: Epoch concluded with size {self.size}")
+        # TODO: recompute numeric std based on latest data, needs a way to reconvert data from standardized
 
     def fast_align(self, existing, new_one, ground_truth=None, existing_df=None, new_one_df=None):
         """Greedy O(N^2) row alignment: repeatedly pick the global max in the similarity matrix."""
@@ -199,8 +201,9 @@ class Attack:
         if new_one_df is None:
             new_one_df = self.prepper.destandardize_np(new_one.detach().cpu().numpy())
             new_one_df = self.prepper.decodeNpToDf(new_one_df)
-        # Similarity = 1 - TableLeak cost.
+        # compute matrix with tableak score
         cost = self.matcher.cost_matrix(existing_df, new_one_df)
+        # could also use self.matcher.sim_matrix
         sim = torch.tensor(1 - cost, dtype=torch.float32).to(self.device)
 
         N = sim.shape[0]
@@ -250,7 +253,7 @@ class Attack:
         return pool_idx
 
     def _ensemble_batch_global(self, new_one, latents=None):
-        """Order-invariant ensembling: blend this batch's rows into the globally-matched pool
+        """Order-invariant ensembling (3.1): blend this batch's rows into the globally-matched pool
         entries instead of a fixed batch slot. Robust to reshuffling."""
         new_one = new_one.detach().cpu()
         B = new_one.shape[0]
@@ -959,7 +962,8 @@ class Attack:
         buffers = {n: b.detach() for n, b in model.named_buffers()}
         delta_flat = torch.cat([d.detach().flatten() for d in weight_delta])
         # The weight delta is flattened parameter-wise exactly like a gradient, so the same
-        # continuous/rest block split (and its precomputation) applies.
+        # continuous/rest block split applies. Omitting this crashed masked FedAvg on any dataset
+        # whose `auto` loss resolves to double-cossim (more categorical than numeric columns).
         self._prepare_double_cossim(delta_flat, model)
         self._prepare_tokenwise(delta_flat, model)
 
@@ -1075,6 +1079,7 @@ class Attack:
 
         # Latent warm-start is independent of dummy-data init strategy:
         # latent warm-start helps multi-epoch ensembling, data warm-start poisons it.
+        # strategy = self._resolve_init_strategy()
         # Latent warm-start is per-slot; under order-invariant global ensembling (reshuffle) the slot
         # no longer maps to fixed rows, so disable it there to avoid a latent<->row mismatch.
         warm_latents = getattr(self.args, "warm_latents", True) and not getattr(self.args, "global_ensemble", False)
@@ -1161,7 +1166,7 @@ class Attack:
         t_pool_start = time.time()
         final_recon = self._ensemble_reconstructions(
             results, strategy="median", ground_truth=ground_truth if self.args.perfect_pooling else None
-        )  # median pooling, as in TabLeak
+        )  # this is tableak strategy
         t_pool_end = time.time()
         del results
         # remove gradient tracking
@@ -1220,6 +1225,7 @@ class Attack:
         del n_cats_amounts
         del known_latents
         del simple
+        # torch.cuda.empty_cache()
         return final_recon.numpy(), metrics
 
     def inversion_gidm(
@@ -1489,6 +1495,7 @@ class Attack:
         for dummy_latents in all_dummy_latents:
             self.diffusion_process.cleanup_dummy_latents(dummy_latents)
         del all_dummy_data, all_dummy_latents, model_snapshots, optimizer
+        # torch.cuda.empty_cache()
 
         return [r.numpy() for r in reconstructions], metrics
 

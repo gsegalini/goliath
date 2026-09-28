@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 
 def dp_sgd_gradient(args, model, data, latents, diffusion_process, device):
-    """Certified DP-SGD gradient: per-example L2 clip + calibrated Gaussian noise.
+    """Certified DP-SGD gradient (rebuttal 8B8y-Q1): per-example L2 clip + calibrated Gaussian noise.
 
     Unlike `gradient_clipping`/`additive_noise` (which clip/noise the ALREADY-AGGREGATED gradient and
     give no (eps,delta) guarantee), this computes true per-example gradients, clips each to L2 norm
@@ -16,7 +16,7 @@ def dp_sgd_gradient(args, model, data, latents, diffusion_process, device):
     calibrated to the target (eps,delta) by src.dp_accountant), and returns the noisy mean gradient.
 
     Gaussian diffusion only (the loss is a plain model(x,t)->MSE, so per-example grads via torch.func are
-    clean). Masked diffusion is not supported.
+    clean). Masked diffusion is not yet supported.
     """
     from .diffusion_process import GaussianDiffusionProcess
     if not isinstance(diffusion_process, GaussianDiffusionProcess):
@@ -84,7 +84,7 @@ def gradient_clipping(input_gradient, bound=4):
     Gradient clipping (clip by norm)
     """
     max_norm = float(bound)
-    norm_type = 2.0  # np.inf selects max-norm clipping
+    norm_type = 2.0 # np.inf
 
     if norm_type == np.inf:
         norms = [g.detach().abs().max() for g in input_gradient]
@@ -224,7 +224,7 @@ def orthogonal_gradient(args, input_gradient, model, ground_truth, latents, diff
             batch_noised = diffusion_process.forward_diffuse(ground_truth, latents)
             new_loss = diffusion_process.compute_training_loss(model, batch_noised, latents)
 
-            # Keep the orthogonal gradient that yields the lowest training loss
+            # Revert to original parameters if needed
             if new_loss < best_loss:
                 best_loss = new_loss
                 best_gradient = [g.detach().clone() for g in noisy_gradient]  # Only clone when necessary

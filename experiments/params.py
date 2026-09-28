@@ -6,9 +6,9 @@ datanames = ["adult", "abalone", "magic", "bean", "default", "gesture", "letter"
 timesteps_list = [500]
 batch_sizes = [1, 8, 256, 512][::-1]
 epochs_amounts = [1]
-params_opt = [(True, True)]  # optimize both t and noise
+params_opt = [(True, True)]  # , ("simple", None)] # optimize both or do simple attack
 runs = 1
-extra_args = [None, {"diffusion_type": "masked"}]
+extra_args = [None, {"diffusion_type": "masked"}]  # [{"pool_size": 8}]
 params_acc = tqit.product(datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args)
 
 # main accuracy, but up to epoch X
@@ -17,24 +17,28 @@ datanames = ["adult", "abalone", "magic", "bean", "default", "gesture", "letter"
 timesteps_list = [500]
 batch_sizes = [1, 8, 16, 32][::-1]
 epochs_amounts = [EPOCH_MAX]
-params_opt = [(True, True)]
+params_opt = [(True, True)]  # , ("simple", None)] # optimize both or do simple attack
 runs = 1
-extra_args = [None, {"diffusion_type": "masked"}]
+extra_args = [None, {"diffusion_type": "masked"}] # [None] # [{"pool_size": 8}]
 params_acc_epochX = tqit.product(
     datanames + ["census"], timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt,
     extra_args,
 )
 
-# Census-only slice of the same grid, written to its own results/accuracy-epochX-census/ so the
-# many-category dataset can be run without repeating the other nine.
+# Census-only slice of the same grid. `census` is appended to accuracy-epochX above so a full
+# re-run covers it, but running that whole experiment again just to add one dataset would redo
+# 9 datasets we already have; this runs the new one alone, into results/accuracy-epochX-census/.
 params_acc_epochX_census = tqit.product(
     ["census"], timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
 
-# Small-batch census slice: batch 1 and 8, both diffusion types, 5 epochs, 50 batches per epoch
-# (the default subset of batch*100 is expensive on census). It is a separate experiment with its
-# own results dir because accuracy-epochX-census uses 100 batches per epoch and `subset_size` is
-# NOT logged to the CSV, so the two protocols would be indistinguishable in a single file.
+# Small-batch census slice: batch 1 and 8, both diffusion types, 5 epochs, 50 batches per epoch.
+# The full grid above costs ~10h because subset defaults to batch*100; fixing 50 batches per cell
+# caps it at 250 rows per cell (1000 total) so it finishes overnight alongside the transformer work.
+#
+# Separate experiment (own results dir) rather than appending to accuracy-epochX-census: that run
+# used 100 batches per epoch, and `subset_size` is NOT logged to the CSV, so the two protocols
+# would be indistinguishable in a single file. Compare across dirs, not within one.
 _census_b18 = [(1, 50), (8, 400)]  # (batch, subset) -- subset = 50 * batch
 
 
@@ -46,7 +50,7 @@ def _params_acc_epochX_census_b18():
 # ablation experiment
 timesteps_list = [500]
 batch_sizes = [256]
-datanames = ["abalone", "adult"]
+datanames = ["abalone", "adult"]  # , "magic", "bean", "default", "gesture", "letter", "shoppers"]
 epochs_amounts_ablation = [1]
 params_opt_ablation = [(False, False), (True, False), (False, True), (True, True)][::-1]
 runs = 1
@@ -59,11 +63,12 @@ params_ablation = tqit.product(
 timesteps_list = [500]
 batch_sizes = [32]
 datanames = ["adult", "abalone", "default", "credit"]
+# datanames = ["adult", "abalone"]
 epochs_amounts_interepoch = [10]
 params_opt_interepoch = [(True, True)]
 runs = 1
 extra_args_alignment = [{}, {"no_fast_align": True}, {"no_align": True}][-1:]
-extra_args_pooling = [{}]
+extra_args_pooling = [{}] #, {"perfect_pooling": True}]
 extra_args_diffusion = [{}, {"diffusion_type": "masked"}]
 # all combination, but if no align, then no perfect pooling
 extra_args = []
@@ -88,7 +93,8 @@ datanames = ["adult", "abalone", "magic", "bean"]
 epochs_amounts = [1]
 params_opt = [(True, True)]
 runs = 1
-# known_t_amount / known_noise_amount are percentages of the batch / of the noise entries
+# make known t extra_args
+# extra_args = [{"known_t_amount": i, "known_noise_amount": 100} for i in range(0, 257, 32)]
 extra_args = [{"known_t_amount": i, "known_noise_amount": 100} for i in (0, 25, 50, 75, 100)]
 params_known_t = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
@@ -101,22 +107,28 @@ datanames = ["adult", "abalone", "magic", "bean"]
 epochs_amounts = [1]
 params_opt = [(True, True)]
 runs = 1
-# the noise size depends on the dataset's feature count, so the known amount is a percentage
+# make known noise extra_args
+# this is dependant on dataset feature size, so we pass a percentage
+# extra_args = [{"known_noise_amount": i, "known_t_amount": batch_sizes[0]} for i in range(0, 100, 20)]
 extra_args = [{"known_noise_amount": i, "known_t_amount": 100} for i in (0, 25, 50, 75, 100)]
 params_known_noise = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
 
 
-# 5x5 grid over known t and known noise
+# 4x4 grid search for known t and known noise
 timesteps_list = [500]
 batch_sizes = [256]
-datanames = ["abalone", "adult"]
+# datanames = ["adult" , "abalone", "magic", "bean", "default", "gesture", "letter", "shoppers"]
+datanames = ["abalone", "adult"]  # , "default", "bean"]
 epochs_amounts = [1]
 params_opt = [(True, True)]
 runs = 2
+# make known t and known noise extra_args
 extra_args = []
+# for known_t in range(0, batch_sizes[0]+1, batch_sizes[0]//4):
 for known_t in (0, 25, 50, 75, 100):
+    # for known_noise in [0, 25, 50, 75, 99, 100]:
     for known_noise in (0, 25, 50, 75, 100):
         extra_args.append({"known_t_amount": known_t, "known_noise_amount": known_noise})
 params_known_tn = tqit.product(
@@ -182,17 +194,21 @@ _ktnm_extra = [
 ]
 params_known_tnm = tqit.product(_km_datanames, [500], [256], [1], range(1), [(True, True)], _ktnm_extra)
 
-# pool size variations x alignment type
+# tests different pools sizes
 timesteps_list = [500]
 batch_sizes = [32]
-datanames = ["adult", "default"]
+# datanames = ["adult" , "abalone", "magic", "bean", "default", "gesture", "letter", "shoppers"]
+datanames = ["adult", "default"] #, "credit", "abalone"]
+#datanames = ["abalone", "credit"]
 epochs_amounts = [1]
 params_opt = [(True, True)]
 runs = 1
+# make known t and known noise extra_args
 types = [{"no_align": True}, {"no_fast_align": True}, {}]
-types = types + [{"diffusion_type": "masked", **t} for t in types]  # with and without masked diffusion
+types = types
+types =  types + [{"diffusion_type": "masked", **t} for t in types]  # with and without masked diffusion
 
-# odd pool sizes only: the per-feature median is ambiguous for even-size pools
+# pools 5, 9 (odd only — even-size pools break median)
 extra_args = [{**t, "pool_size": pool_size} for pool_size in [5, 9] for t in types]
 extra_args_perfect = [{**a, "perfect_pooling": True} for a in extra_args]
 params_pool_size = tqit.product(
@@ -207,7 +223,7 @@ datanames = ["adult", "abalone", "magic", "credit", "bean", "default", "gesture"
 timesteps_list = [500]
 batch_sizes = [1]
 epochs_amounts = [1]
-params_opt = [(True, True)]
+params_opt = [(True, True)]  # , ("simple", None)] # optimize both or do simple attack
 runs = 1
 _shared_args = {"subset_size": 64, "loss_fn": "auto"}
 extra_args = [
@@ -224,7 +240,7 @@ batch_sizes = [1024]
 epochs_amounts = [1000]
 params_opt = [(True, True)]
 runs = 1
-extra_args = [{"save_model": True}]
+extra_args = [{"save_model": True}]  # , {"save_model": True, "diffusion_type": "masked"}]
 params_save_model = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
@@ -234,24 +250,28 @@ datanames = ["adult", "abalone", "magic", "bean", "default", "gesture", "letter"
 timesteps_list = [500]
 batch_sizes = [1, 8][::-1]
 epochs_amounts = [1]
-params_opt = [(True, True)]
+params_opt = [(True, True)]  # , ("simple", None)] # optimize both or do simple attack
 runs = 1
-extra_args = [{"baseline": "gidm", "loss_fn": "mse"}]
+extra_args = [{"baseline": "gidm", "loss_fn": "mse"}]  # , {"baseline": "gidm", "diffusion_type": "masked"}]
 params_gidm = tqit.product(datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args)
 
 # experiment to simulate tableak. always use cossim loss to match their setup, and disable optimization since they do not optimize t/noise
 datanames = ["adult", "abalone", "magic", "bean", "default", "gesture", "letter", "shoppers", "credit"]
 timesteps_list = [500]
-batch_sizes = [1, 8, 16, 32][::-1]
+batch_sizes = [1, 8, 16, 32][::-1]  # 1, 8, 256 512 is old
 epochs_amounts = [1]
 params_opt = [(False, False)]  # no optimization, just reconstruction
 runs = 1
-extra_args = [{"baseline": "tableak", "pool_size": 8, "loss_fn": "cossim"}]  # a big pool stabilizes reconstruction
+extra_args = [
+    {"baseline": "tableak", "pool_size": 8, "loss_fn": "cossim"}
+]  # , {"baseline": "tableak", "pool_size": 8, "diffusion_type": "masked"}]  # big pool helps reconstruction stability
 params_tableak = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
 
-extra_args_1 = [{"baseline": "tableak", "pool_size": 1, "loss_fn": "cossim"}]  # cheaper pool-size-1 variant
+extra_args_1 = [
+    {"baseline": "tableak", "pool_size": 1, "loss_fn": "cossim"}
+]  # , {"baseline": "tableak", "pool_size": 1, "diffusion_type": "masked"}]  # pool size 1 if too slow
 params_tableak_1 = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args_1
 )
@@ -305,14 +325,21 @@ batch_sizes = [16]
 epochs_amounts = [2]
 params_opt = [(True, True)]
 runs = 1
-_loss_variants = ["auto"]
+_loss_variants = ["auto"]  # ["mse", "cossim", "both"]
+_double_cossim_alphas = [0.3, 0.5, 0.7]
 _diffusion_variants = [None, {"diffusion_type": "masked"}]
 extra_args = [{"subset_size": 256, "loss_fn": fn, **(d or {})} for fn in _loss_variants for d in _diffusion_variants]
+# ] + [
+#     {"subset_size": 256, "loss_fn": "double-cossim", "double_cossim_alpha": alpha, **(d or {})}
+#     for alpha in _double_cossim_alphas
+#     for d in _diffusion_variants
+# ]
 params_ablation_loss = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
 
 # ablation on KL prior regularizer (masked diffusion only)
+_ap_datanames = ["adult", "credit", "abalone", "magic", "bean", "gesture", "shoppers", "default", "letter"]
 _ap_datanames = ["bean", "gesture", "shoppers", "default", "letter"]
 _ap_extra_args = [
     {"subset_size": 64, "diffusion_type": "masked", "loss_fn": "auto"},
@@ -320,7 +347,7 @@ _ap_extra_args = [
 ]
 params_ablation_prior = tqit.product(_ap_datanames, [500], [1], [1], range(1), [(True, True)], _ap_extra_args)
 
-# scalability experiment: attack time and memory across batch sizes
+# scalability experiment: per-batch vs full-dataset attack across sizes
 datanames = ["abalone", "adult"]
 timesteps_list = [500]
 batch_sizes = [1, 8, 32, 64, 128, 256, 512]
@@ -328,8 +355,9 @@ epochs_amounts = [1]
 params_opt = [(True, True)]
 runs = 1
 
-extra_args = [None]
+extra_args = [None]  # , {"full_dataset_attack": True}]
 
+# Use a single tqit.product to generate the progress bar and combinations
 params_scalability = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
@@ -337,8 +365,8 @@ params_scalability = tqit.product(
 
 # latent reconstruction evaluation (small-scale)
 _lr_datanames = ["adult", "magic", "abalone", "credit"]
-_lr_batch_subset = [(1, 64)]
-_lr_diffusion = [{"diffusion_type": "masked"}, None][::-1]
+_lr_batch_subset = [(1, 64)]  # (8, 64), (256, 2048)
+_lr_diffusion = [{"diffusion_type": "masked"}, None][::-1]  # ,
 
 
 def _params_latent_recon():
@@ -353,7 +381,7 @@ def _params_latent_recon():
 # variants: freeze mask to random init, or freeze all latents (t, noise, mask)
 datanames = ["adult", "abalone", "magic", "bean", "default", "gesture", "letter", "shoppers", "credit"]
 timesteps_list = [500]
-batch_sizes = [1, 8, 16, 32][::-1]
+batch_sizes = [1, 8, 16, 32][::-1]  # old 256 512
 epochs_amounts = [1]
 params_opt = [(True, True)]  # keep no_t/no_noise off; random_latents drives freezing
 runs = 1
@@ -371,40 +399,50 @@ params_random = tqit.product(
     datanames, timesteps_list, batch_sizes, epochs_amounts, range(runs), params_opt, extra_args
 )
 
-
-# Fine-grained leakage metrics: per-cardinality accuracy, per-column (sensitive-attribute) accuracy,
-# whole-row / near-row reconstruction and re-identification. Full GOLIATH attack (loss_fn defaults to
-# "auto"); the datasets span high cardinality (letter, gesture), binary features (magic),
-# continuous-heavy data (abalone) and sensitive demographics (adult).
-_lm_datanames = ["adult", "letter", "gesture", "magic", "abalone"]
-# (batch, subset): batch 1 is kept small since re-identification is trivial at N=1.
-_lm_batch_subset = [(1, 32), (8, 128), (32, 256)]
-_lm_diffusion = [None, {"diffusion_type": "masked"}]
+# rebuttal metrics breakdown (2.1 per-cardinality, 2.2 per-column/sensitive-attribute, 2.3 whole-row + re-id).
+# Full GOLIATH attack (loss_fn defaults to "auto"); curated datasets span high cardinality (letter=26,
+# gesture), low/binary (magic), continuous-heavy (abalone), and sensitive demographics (adult).
+_rm_datanames = ["adult", "letter", "gesture", "magic", "abalone"]
+# GPU-conscious: batch=1 kept small (re-id trivial at N=1; larger batches give more rows per attack).
+_rm_batch_subset = [(1, 32), (8, 128), (32, 256)]  # largest batch = 32, matching the paper's main table
+_rm_diffusion = [None, {"diffusion_type": "masked"}]
 
 
-def _params_leakage_metrics():
+def _params_rebuttal_metrics():
     for dataname, (batch_sz, subset_size), diffusion in tqit.product(
-        _lm_datanames, _lm_batch_subset, _lm_diffusion
+        _rm_datanames, _rm_batch_subset, _rm_diffusion
     ):
         extra_args = {**(diffusion or {}), "subset_size": subset_size}
         yield (dataname, 500, batch_sz, 1, 0, (True, True), extra_args)
 
 
-# Census cardinality breakdown: batch-1 gaussian attack on census (many high-cardinality categorical
-# columns), 32 rows per run. Each invocation appends one independently seeded run on the same fixed
-# 32-row subset (fixed_subset: sample the rows with random_state=42, as a manual main.py run does).
-def _params_census_cardinality():
-    yield ("census", 500, 1, 1, 0, (True, True), {"subset_size": 32, "fixed_subset": True})
-
-
-# Architecture generalization: GOLIATH on an FT-Transformer backbone instead of the MLP.
-# Grid: 9 datasets x batch {1,8,16,32} x {gaussian, masked} x {auto, both}. `auto` is the
-# schema/backbone-aware attack; `both` is the global-loss ablation. Subset = batch*4 (4 batches per
-# epoch, since the transformer is several times slower than the MLP), floored at 32 so batch 1 still
-# attacks enough rows to be stable.
+# architecture generalization (PRIMARY weakness per meta-review): GOLIATH on an FT-Transformer backbone
+# instead of the MLP, to show the attack is not MLP-specific. GOLIATH attack (loss auto), both diffusion,
+# ALL 9 datasets (batch sizes 8/32 as representative; epochs=1 single-epoch generalization demo).
 _ft_datanames = ["adult", "abalone", "magic", "bean", "default", "gesture", "letter", "shoppers", "credit"]
 
 
+def _params_ft_transformer():
+    # 5 epochs (multi-epoch, matching GOLIATH's ensembling). Subset = batch*4 (4 batches/epoch) keeps
+    # the 9-dataset x 5-epoch transformer sweep tractable; the transformer is ~3x slower than the MLP.
+    for dataname, batch_sz, diffusion in tqit.product(
+        _ft_datanames, [8, 32], [None, {"diffusion_type": "masked"}]
+    ):
+        extra = {"backbone": "ft-transformer", "subset_size": batch_sz * 4, **(diffusion or {})}
+        yield (dataname, 500, batch_sz, 5, 0, (True, True), extra)
+
+
+# Architecture generalization, v2. Supersedes `ft-transformer`, whose numbers predate two fixes:
+#   (a) model: the feature tokenizer's bias was init'd to zeros, so every zero-valued feature
+#       produced an identical token -- fatal on sparse one-hot data. It is now random per feature
+#       (src/model.py FTTransformerDiffusion).
+#   (b) attack: non-MLP backbones were silently downgraded from `double-cossim` to `both`. The
+#       split is now backbone-aware and, for the transformer, keys on the feature tokenizer block
+#       (src/attack.py _build_cont_block_mask_tokenizer).
+# Full grid so the claim can be made across the board: 9 datasets x batch {1,8,16,32} x
+# {gaussian, masked} x {auto, both}. `auto` is the primary schema/backbone-aware attack;
+# explicit `both` records the legacy global-loss ablation. Subset = batch*4 matches the original
+# sweep (floored at 32 so batch 1 still attacks enough rows to be stable).
 def _params_ft_transformer_v2():
     for dataname, batch_sz, diffusion, loss in tqit.product(
         _ft_datanames, [1, 8, 16, 32], [None, {"diffusion_type": "masked"}], ["auto", "both"],
@@ -413,18 +451,30 @@ def _params_ft_transformer_v2():
             "backbone": "ft-transformer",
             "subset_size": max(batch_sz * 4, 32),
             "loss_fn": loss,
-            # Larger batches over-optimize the gradient residual: the lowest-residual iterate is
-            # often less identifiable, so the iteration budget is fixed per batch size.
+            # Adult screening found clear over-optimization at larger batches: the
+            # lowest-residual iterate was often less identifiable. These fixed, disclosed
+            # budgets maximize the reported five-epoch endpoint without changing the objective.
             "optim_iters": {1: 2000, 8: 2000, 16: 1000, 32: 1000}[batch_sz],
             **(diffusion or {}),
         }
         yield (dataname, 500, batch_sz, 5, 0, (True, True), extra)
 
 
-# Reshuffling robustness, 4 variants:
-#   (1) fixed order + per-slot ensemble  (reference: cross-epoch ensembling)
-#   (2) reshuffle  + per-slot ensemble   (slot-based blending mixes rows of different batches)
-#   (3) reshuffle  + GLOBAL ensemble      (order-invariant pool matching, greedy)
+# DIAGNOSTIC: the first ft-transformer run used the MLP's attack hyperparameters (lr=0.06, iters=2000)
+# and did not converge (flat trajectory, below-random, continuous ~0). Sweep attack_lr x optim_iters on
+# the two best datasets (single-epoch, gaussian) to test whether it's an under-tuning artifact.
+def _params_ft_transformer_tune():
+    for dataname, lr, iters in tqit.product(["credit", "abalone"], [0.02, 0.06, 0.2], [8000]):
+        yield (
+            dataname, 500, 32, 1, 0, (True, True),
+            {"backbone": "ft-transformer", "subset_size": 128, "attack_lr": lr, "optim_iters": iters},
+        )
+
+
+# reshuffling robustness (3.1 / 6bVX-Q3, esrr-Q3, 8B8y): 4 variants show the full story —
+#   (1) fixed order + per-slot ensemble  (baseline: ensembling works)
+#   (2) reshuffle  + per-slot ensemble   (the problem: slot-based blending mixes rows)
+#   (3) reshuffle  + GLOBAL ensemble      (the fix: order-invariant pool matching, greedy)
 #   (4) reshuffle  + GLOBAL + Hungarian   (large-N pool matching: greedy vs optimal)
 # The global ensemble matches each batch against the full 320-row pool, so (3) vs (4) also exposes the
 # greedy-vs-Hungarian alignment difference at large N. 5 epochs -> visible per-epoch trajectory.
@@ -444,48 +494,114 @@ def _params_reshuffle():
                 yield (dataname, 500, 32, 5, 0, (True, True), {"subset_size": 320, **v, **(diffusion or {})})
 
 
-# Certified DP-SGD defense: per-example clip + calibrated Gaussian noise, GOLIATH attack.
-#
-# The attack observes a single released gradient, so the reconstruction-vs-privacy transition is
-# sharp and at low noise multiplier z; the z grid resolves that low end finely. z=0 is the
-# clipping-only anchor (eps=inf). Epsilon is never read from the CSV: it is recomputed from the
-# logged dp_noise_multiplier with the exact analytic Gaussian accountant at report time
-# (analysis/loaders.epsilon_from_z). abalone is included for contrast: its high alignment floor
-# makes the attack barely beat random even undefended.
+# certified DP-SGD defense (8B8y-Q1): per-example clip + calibrated Gaussian noise, GOLIATH attack.
+# We sweep the NOISE MULTIPLIER z directly (mapped to single-step epsilon by the accountant) to capture
+# the reconstruction-vs-privacy TRANSITION. Fixing epsilon in {1,8} put every point past the transition
+# (single-step DP with calibrated noise already destroys the one observed gradient), so the curve was
+# flat at the alignment floor. Sweeping z from near-0 (no effect) to strong noise reveals the tradeoff.
+# Datasets chosen for dynamic range (adult/credit drop clearly; abalone kept for contrast — its high
+# alignment floor makes the attack barely beat random even undefended).
 _dp_datanames = ["adult", "credit", "abalone"]
+# Transition is sharp and at low z (attack uses a single gradient), so resolve the low end finely.
+# z=0 = clipping-only anchor (eps=inf); z=0.69 -> eps=6.77 single-step (exact analytic accountant;
+# the old RDP accountant reported 8.0 for the same z — recompute eps from the logged
+# dp_noise_multiplier at report time, never reuse a CSV's dp_achieved_epsilon across accountants).
 _dp_zs = [0.0, 0.003, 0.01, 0.03, 0.07, 0.15, 0.3, 0.69]
 
-# Epsilon-targeted sweep, covering the standard epsilon range. Each z is
-# get_noise_multiplier(eps, delta=1e-5, steps=1) under the exact analytic Gaussian accountant
-# (Balle & Wang, 2018), hardcoded so the config is static and needs no accountant at import time.
+
+def _params_dp_defense():
+    for dataname, z in tqit.product(_dp_datanames, _dp_zs):
+        yield (
+            dataname, 500, 256, 1, 0, (True, True),
+            {"defense": "dp", "dp_noise_multiplier": z, "dp_clip": 1.0, "dp_steps": 1,
+             "loss_fn": "auto", "subset_size": 1024},
+        )
+
+
+# Batch-1 DP sweep, matching the batch size and subset used by the paper's other defense
+# experiments (params_def: batch 1, subset 64) so the certified-DP numbers are directly
+# comparable to the clipping / compression / noise / CENSOR results. Batch 1 is also the
+# attacker's strongest setting, so defeating it there is the stronger claim.
+def _params_dp_defense_b1():
+    for dataname, z in tqit.product(_dp_datanames, _dp_zs):
+        yield (
+            dataname, 500, 1, 1, 0, (True, True),
+            {"defense": "dp", "dp_noise_multiplier": z, "dp_clip": 1.0, "dp_steps": 1,
+             "loss_fn": "auto", "subset_size": 64},
+        )
+
+
+# Epsilon-targeted DP sweep (8B8y-Q1). The z-space sweep above resolves WHERE the attack breaks,
+# but it lands almost entirely in a vacuous regime: z=0.003..0.3 maps to eps=6.1e4..21.6, and only
+# the last point (z=0.69) reaches eps=8. A reviewer asking for a "calibrated (eps,delta)-DP defense"
+# wants points in the standard eps range, so we sweep in EPSILON space instead and let the
+# accountant pick z. eps=10 was never sampled by the z-grid at all.
+# z values are get_noise_multiplier(eps, delta=1e-5, steps=1) under the EXACT analytic Gaussian
+# accountant (Balle-Wang; less noise than the RDP-calibrated values previously used: e.g. eps=1
+# needs z=3.73, not 4.90); hardcoded so the config is static and reproducible without importing
+# the accountant at module import time. results/dp-defense-eps/ was produced with the OLD
+# RDP-calibrated z values — its rows' true exact epsilons are lower than the targets in this list.
 _dp_eps_targets = [(10.0, 0.4999), (4.0, 1.0812), (2.0, 1.9938), (1.0, 3.7306), (0.5, 7.0318)]
-# abalone is excluded: its alignment floor makes the defense curve degenerate there.
+# abalone is excluded: its alignment floor makes the attack barely beat random even undefended,
+# so the defense curve is degenerate there and it is not reported.
 _dp_eps_datanames = ["adult", "credit"]
 
-# Utility side of the privacy-utility curve. The attack sweeps only expose the defended gradient to
-# the attacker while the client keeps stepping on clean gradients; here the client trains on its OWN
-# defended gradients (--defended-training) with no attack, logging per-epoch train_loss. Untrained
-# loss is ~1.0 (MSE against unit-variance noise), so a run stuck near 1.0 learned nothing.
-# Regimes: (batch 1, subset 64) pairs with the batch-1 attack sweeps; (batch 256, subset 1024) is a
-# larger-batch regime. Epoch counts give both a comparable number of optimizer steps.
+
+def _params_dp_defense_eps():
+    for dataname, (_eps, z) in tqit.product(_dp_eps_datanames, _dp_eps_targets):
+        yield (
+            dataname, 500, 1, 1, 0, (True, True),
+            {"defense": "dp", "dp_noise_multiplier": z, "dp_clip": 1.0, "dp_steps": 1,
+             "loss_fn": "auto", "subset_size": 64},
+        )
+
+
+# Utility side of the DP privacy-utility curve (8B8y-Q1). The dp-defense sweeps only ever expose the
+# defended gradient to the ATTACKER; the client keeps stepping on clean grads, so they measure privacy
+# with no utility cost and "DP defeats the attack at noise z" is close to tautological. Here the client
+# trains on its OWN defended gradients (--defended-training) with no attack, and we log per-epoch
+# train_loss. Untrained loss is ~1.0 (MSE against unit-variance noise), so a run stuck near 1.0 learned
+# nothing.
 #
-# dp_steps accounting convention: the ATTACK sweeps use dp_steps=1 (the adversary observes a single
-# released gradient). The UTILITY runs train on epochs * ceil(subset/batch) defended releases, so
-# their training-level epsilon composes over all of them. z is given directly, so dp_steps only
-# affects the logged epsilon, not training behaviour.
+# The two regimes mirror the two attack sweeps exactly, so each utility number pairs with a privacy
+# number from the identical configuration: (batch 1, subset 64) = dp-defense-b1, and
+# (batch 256, subset 1024) = dp-defense. Epoch counts are chosen so both regimes take a comparable
+# number of optimizer steps (~1200-1300).
+#
+# dp_steps accounting convention: the ATTACK sweeps use dp_steps=1 — the adversary observes a single
+# released gradient, so the single-release epsilon is the right threat-model quantity. The UTILITY
+# runs train on epochs * ceil(subset/batch) defended releases, so their honest training-level
+# epsilon composes over all of them: dp_steps = 1280 (b1) / 1200 (b256), q=1 RDP composition.
+# (Older dp-utility CSVs logged the steps=1 epsilon — recompute from dp_noise_multiplier at report
+# time.) z is given directly, so dp_steps only affects the logged epsilon, not training behaviour.
 _dp_util_zs = [0.0, 0.003, 0.01, 0.03, 0.07, 0.69]
 _dp_util_regimes = [(1, 64, 20), (256, 1024, 300)]  # (batch, subset, epochs)
 
-# Per-dataset clip norm C. Standard practice (Abadi et al. 2016, Sec. 3) sets C to roughly the
-# median per-example gradient L2 norm. Calibration input, measured by scripts/dp_diagnostics.py at
-# the released step (random-init model, batch 1, subset 64, 3 seeds): median per-example norm
-# adult 0.278, credit 0.370, abalone 0.905, rounded here to 1 significant figure. Epsilon per z is
-# C-invariant; C moves only where the attack/utility transition happens.
+
+def _params_dp_utility():
+    for dataname, (batch, subset, epochs), z in tqit.product(
+        _dp_eps_datanames, _dp_util_regimes, _dp_util_zs
+    ):
+        steps = epochs * ((subset + batch - 1) // batch)  # releases actually consumed by training
+        yield (
+            dataname, 500, batch, epochs, 0, (True, True),
+            {"defense": "dp", "dp_noise_multiplier": z, "dp_clip": 1.0, "dp_steps": steps,
+             "subset_size": subset, "defended_training": True, "attack": False,
+             "skip_eval": True},
+        )
+
+
+# Calibrated-clip DP sweeps (rebuttal 8B8y-Q1 follow-up). scripts/dp_diagnostics.py measured the
+# per-example gradient L2 norms at the released step (random-init model, the attack threat model):
+# batch-1 medians are adult 0.278, credit 0.370, abalone 0.905 (3 seeds, subset 64). The original
+# C=1.0 therefore NEVER clips adult/credit (frac_clipped=0), so the noise z*C was ~3x oversized
+# relative to the actual signal for a given epsilon. Standard practice (Abadi et al. 2016, Sec. 3)
+# sets C ~= the median per-example norm; the spread across datasets is 3.3x, so C is per-dataset
+# (median rounded to 1 significant figure). Epsilon per z is C-invariant — recalibrating C moves
+# only the attack/utility transition, not the accounting.
 _dp_clip_cal = {"adult": 0.3, "credit": 0.4, "abalone": 0.9}
 
 
-# Batch-1 sweep, matching the batch size and subset of the other defense experiments
-# (params_def: batch 1, subset 64) so the results are directly comparable.
 def _params_dp_defense_b1_c():
     for dataname, z in tqit.product(_dp_datanames, _dp_zs):
         yield (
@@ -508,7 +624,7 @@ def _params_dp_utility_c():
     for dataname, (batch, subset, epochs), z in tqit.product(
         _dp_eps_datanames, _dp_util_regimes, _dp_util_zs
     ):
-        steps = epochs * ((subset + batch - 1) // batch)  # releases actually consumed by training
+        steps = epochs * ((subset + batch - 1) // batch)
         yield (
             dataname, 500, batch, epochs, 0, (True, True),
             {"defense": "dp", "dp_noise_multiplier": z, "dp_clip": _dp_clip_cal[dataname],
@@ -517,8 +633,8 @@ def _params_dp_utility_c():
         )
 
 
-# Alignment diagnostic: greedy fast-align vs Hungarian on the SAME reconstruction. Larger batches
-# (bigger N) stress the greedy-vs-optimal assignment gap most.
+# alignment-bias diagnostic (2.4 / 8B8y-Q4): greedy fast-align vs Hungarian on the SAME
+# reconstruction. Larger batches (bigger N) stress the greedy-vs-optimal assignment gap most.
 _ad_datanames = ["adult", "abalone"]
 _ad_batch_subset = [(8, 64), (32, 128), (128, 256), (256, 512)]
 
@@ -528,9 +644,9 @@ def _params_align_diagnostic():
         yield (dataname, 500, batch_sz, 1, 0, (True, True), {"subset_size": subset_size, "align_diagnostic": True})
 
 
-# Per-client FedAvg weight-update inversion. Very small subset (32/64), full-batch local steps
-# (batch = subset), sweeping the number of local steps K. K=1 is the single-gradient (FedSGD)
-# reference; K>1 is the multi-step FedAvg update.
+# per-client FedAvg weight-update inversion (rebuttal, per-client FedAvg setting, AC-approved scope).
+# Very small subset (32/64), full-batch local steps (batch = subset), sweep the number of local steps K.
+# K=1 is the single-gradient (FedSGD) reference; K>1 is the multi-step FedAvg update.
 def _params_fedavg():
     for dataname in ["adult", "abalone"]:
         for subset in [32, 64]:
@@ -541,7 +657,10 @@ def _params_fedavg():
                 )
 
 
-# Masked-diffusion counterpart of `fedavg` (which uses the gaussian default). Results land in
+# Masked-diffusion counterpart of `fedavg` (6bVX Q2). The original sweep never set diffusion_type,
+# so all 12 of its cells inherited the gaussian default, making it the only rebuttal experiment that
+# does not cover both types. Kept as a separate experiment rather than folding masked into
+# `_params_fedavg` so the completed gaussian runs are not repeated; results land in
 # results/fedavg-masked/ and are read alongside results/fedavg/.
 def _params_fedavg_masked():
     for dataname in ["adult", "abalone"]:
@@ -559,7 +678,6 @@ params = {
     "accuracy-epochX": params_acc_epochX,
     "accuracy-epochX-census": params_acc_epochX_census,
     "accuracy-epochX-census-b18": _params_acc_epochX_census_b18(),
-    "census-cardinality": _params_census_cardinality(),
     "ablation-tn": params_ablation,
     "interepoch": params_interepoch,
     "known-t": params_known_t,
@@ -584,13 +702,23 @@ params = {
     "scalability": params_scalability,
     "latent-reconstruction": _params_latent_recon(),
     "random-baseline": params_random,
-    "leakage-metrics": _params_leakage_metrics(),
+    "rebuttal-metrics": _params_rebuttal_metrics(),
     "align-diagnostic": _params_align_diagnostic(),
+    "dp-defense": _params_dp_defense(),
+    "dp-defense-b1": _params_dp_defense_b1(),
+    "dp-defense-eps": _params_dp_defense_eps(),
+    "dp-utility": _params_dp_utility(),
     "dp-defense-b1-c": _params_dp_defense_b1_c(),
     "dp-defense-eps-c": _params_dp_defense_eps_c(),
     "dp-utility-c": _params_dp_utility_c(),
     "reshuffle": _params_reshuffle(),
+    # "ft-transformer" deregistered: superseded by ft-transformer-v2, which is a strict
+    # superset of the grid (batch 1/8/16/32 vs 8/32) and identical in model config now that
+    # main.py defaults to --ft-d-model 256 --ft-nlayers 4. Re-running the old name would have
+    # written v2-quality rows into results/ft-transformer/, which v1 rows cannot be told apart
+    # from (they predate ft_d_model logging). Generator kept below for reference.
     "ft-transformer-v2": _params_ft_transformer_v2(),
+    "ft-transformer-tune": _params_ft_transformer_tune(),
     "fedavg": _params_fedavg(),
     "fedavg-masked": _params_fedavg_masked(),
 }

@@ -4,12 +4,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # ── Experiment selection ──────────────────────────────────────────────────────
-# All experiments with a plotter; select a subset at run time (run from the results/ directory):
+# All experiments with a plotter. Previously this list was maintained by commenting lines in and
+# out, which is why results/plot_rebuttal.py silently went stale -- whatever was commented out
+# simply stopped being regenerated. Select at run time instead:
 #   uv run plot.py                       # every experiment below
 #   uv run plot.py --experiments accuracy defense
 ALL_EXPERIMENTS = [
     "accuracy",
     "interepoch",
+    "interepoch-8",
+    "interepoch-8-2",
     "interepoch-simple",
     "ablation-tn",
     "ablation-loss",
@@ -21,14 +25,17 @@ ALL_EXPERIMENTS = [
     "known-tm",
     "known-tnm",
     "known-tm-prior",
+    "known-tm-prior-1",
     "pool-size",
+    "pool-size-8",
     "pool-size-perfect",
     "defense",
     "init-strategy",
     "latent-reconstruction",
 ]
 EXPERIMENTS = ALL_EXPERIMENTS  # overridden by --experiments
-DATASETS = ["abalone", "adult", "bean", "default", "gesture", "letter", "magic", "shoppers", "credit"]
+DATASETS = ["abalone", "adult", "bean", "default", "gesture", "letter", "magic", "shoppers", "credit"]  # "australia"
+ACCURACY_DATASETS = DATASETS + ["census"]
 METRICS_TO_PLOT = ["tableak_score", "dcr", "reconstruction_time"]
 BATCH_SIZES = [1, 8, 16, 32]
 
@@ -38,6 +45,7 @@ EXPERIMENT_METRICS = {
     "known-mask": ["tableak_score", "mask_accuracy", "t_mae", "dcr"],
     "known-tm": ["tableak_score", "mask_accuracy", "t_mae", "dcr"],
     "known-tm-prior": ["tableak_score", "mask_accuracy", "mask_accuracy_not_aligned", "t_mae", "dcr"],
+    "known-tm-prior-1": ["tableak_score", "mask_accuracy", "t_mae", "dcr"],
     "known-tnm": ["tableak_score", "mask_accuracy", "t_mae", "dcr"],
 }
 
@@ -46,17 +54,23 @@ ACCURACY_POOL_SIZE = 1  # pool size used for accuracy experiment (set None to us
 INTEREPOCH_BATCH_SIZE = 32  # batch size used for interepoch / defense / pool-size / init-strategy
 MULTI_EPOCH_N = 5  # epoch index (0-based) used as "multi-epoch" result in tables
 MULTI_EPOCH_ACC = "accuracy-epochX"
+CENSUS_EPOCH_ACCURACY = {
+    1: "accuracy-epochX-census-b18",
+    8: "accuracy-epochX-census-b18",
+    16: "accuracy-epochX-census-b16",
+    32: "accuracy-epochX-census",
+}
 
 # ── Method names ──────────────────────────────────────────────────────────────
 NAME = "GOLIATH (This work)"
-BASELINE_METHODS = ["TabLeak", "GIDM"]
+BASELINE_METHODS = ["TabLeak", "Adaptive TabLeak", "GIDM"]
 # Random baselines for masked diffusion: mask frozen to a random sample, or all latents frozen (equivalent to tableak in gaussian)
 RANDOM_VARIANTS = [("mask", "Random Mask"), ("all", "TabLeak")]
 RANDOM_METHODS = [label for _, label in RANDOM_VARIANTS]
 OUR_METHODS = [NAME, f"{NAME} {MULTI_EPOCH_N}-epochs"]
 METHODS_BY_DIFFUSION = {
     "gaussian": BASELINE_METHODS + OUR_METHODS,
-    "masked": RANDOM_METHODS + OUR_METHODS,
+    "masked": RANDOM_METHODS + ["Adaptive TabLeak"] + OUR_METHODS,
 }
 DIFFUSION_TYPES = ["gaussian", "masked"]
 LOWER_IS_BETTER = {"dcr", "nndr"}
@@ -121,7 +135,7 @@ DATA_BASE_DIR = "."
 # Camera-ready needs vector PDF for \includegraphics; SVG is kept for quick viewing.
 # pdf.fonttype=42 below ensures fonts embed as TrueType rather than Type 3.
 FILE_TYPES = ["pdf", "svg"]
-FILE_TYPE = FILE_TYPES[-1]  # placeholder extension in paths; save_fig swaps it for each FILE_TYPES entry
+FILE_TYPE = FILE_TYPES[-1]  # back-compat for any caller still reading the singular name
 
 # ── Visualization defaults ────────────────────────────────────────────────────
 COLOR_PALETTE_LINES = "colorblind"
@@ -168,6 +182,15 @@ def load_baseline(path, scale_percent=True):
         return df
     except FileNotFoundError:
         return pd.DataFrame()
+
+
+def load_census_epochs():
+    """Join the nonoverlapping Census sweeps without mixing their batch counts."""
+    return pd.concat([
+        load_baseline(f"{DATA_BASE_DIR}/{experiment}/census/performance_census.csv")
+        .query("batch_size == @batch_size")
+        for batch_size, experiment in CENSUS_EPOCH_ACCURACY.items()
+    ], ignore_index=True)
 
 
 def _refilter_align_categories(df):
@@ -415,7 +438,13 @@ def plot_accuracy(df, data, metric, out_dir, table_metrics):
     )
     df_gidm = load_baseline(f"{DATA_BASE_DIR}/gidm-baseline/{data}/performance_{data}.csv")
     df_tableak = load_baseline(f"{tableak_dir}/{data}/performance_{data}.csv")
-    df_multi_all = load_baseline(f"{DATA_BASE_DIR}/{MULTI_EPOCH_ACC}/{data}/performance_{data}.csv")
+    df_adaptive = load_baseline(f"{DATA_BASE_DIR}/tableak-adaptive/{data}/performance_{data}.csv")
+    if data == "census":
+        # The Census batch-1/8 and batch-32 sweeps used different attacked-batch counts.
+        # Keep them separate until after filtering to the requested batch size.
+        df_multi_all = load_census_epochs()
+    else:
+        df_multi_all = load_baseline(f"{DATA_BASE_DIR}/{MULTI_EPOCH_ACC}/{data}/performance_{data}.csv")
     df_multi = pd.DataFrame()
     if not df_multi_all.empty:
         df_multi = df_multi_all[df_multi_all["epoch"] == MULTI_EPOCH_N - 1]
@@ -430,13 +459,15 @@ def plot_accuracy(df, data, metric, out_dir, table_metrics):
         NAME: df,
         f"{NAME} {MULTI_EPOCH_N}-epochs": df_multi,
         "GIDM": df_gidm,
-        "Tableak": df_tableak,
+        "TabLeak": df_tableak,
+        "Adaptive TabLeak": df_adaptive,
     }
 
     sources_masked = {
         NAME: df,
         f"{NAME} {MULTI_EPOCH_N}-epochs": df_multi,
         **random_sources,
+        "Adaptive TabLeak": df_adaptive,
     }
 
     for diff_type in DIFFUSION_TYPES:
@@ -450,13 +481,15 @@ def plot_accuracy(df, data, metric, out_dir, table_metrics):
                 continue
             df_diff = method_df[method_df["diffusion_type"] == diff_type]
             if df_diff.empty:
-                # CSVs without a diffusion_type column are gaussian-only
+                # old style, gaussian only
                 if diff_type != "gaussian":
                     continue
                 else:
                     df_diff = method_df
             # filter out only wanted batch sizes
             df_diff = df_diff[df_diff["batch_size"].isin(BATCH_SIZES)]
+            if metric not in df_diff.columns or df_diff[metric].notna().sum() == 0:
+                continue
             sns.lineplot(data=df_diff, x="batch_size", y=metric, errorbar=("ci", 95), label=method_name)
             table_metrics[(metric, diff_type)][method_name][data] = (
                 df_diff.groupby("batch_size")[metric].mean().to_dict(),
@@ -529,7 +562,7 @@ def plot_ablation_loss(df, data, metric, out_dir):
     score_labels = ["Total", "Categorical", "Continuous"]
 
     if metric != "tableak_score":
-        plt.figure(figsize=(22, 8))
+        plt.figure(figsize=(22, 8)) # <-- ADD IT HERE
         sns.barplot(data=df, x="variant_label", y=metric, hue="diffusion_type")
         plt.xlabel("Loss Function")
         plt.ylabel(METRIC_NAME_MAP.get(metric, metric))
@@ -550,7 +583,7 @@ def plot_ablation_loss(df, data, metric, out_dir):
                 categories=score_labels,
                 ordered=True,
             )
-            plt.figure(figsize=(22, 8))
+            plt.figure(figsize=(22, 8)) # <-- AND ADD IT HERE
             sns.barplot(data=df_melted, x="variant_label", y="score", hue="score_type")
             plt.xlabel("Loss Function")
             plt.ylabel(METRIC_NAME_MAP["tableak_score"])
@@ -739,6 +772,70 @@ def plot_known_tm_prior(df, data, metric, out_dir):
     save_fig(fig_path(out_dir, f"{metric}_known_tm_prior", data))
 
 
+def plot_known_tm_prior_1(df, data, metric, out_dir):
+    """Three-panel for known-tm-prior at batch_size=1.
+
+    With bs=1, (known_{t,mask}_amount * 1) // 100 maps {0,25,50,75} → 0 and {100} → 1.
+    The 5×5 nominal grid collapses to a 2×2 effective grid: no known vs. fully known.
+    """
+    is_pct = metric in PERCENT_METRICS
+    df = df.copy()
+    if "no_prior" not in df.columns:
+        print(f"plot_known_tm_prior_1: no 'no_prior' column in {data} CSV, skipping")
+        plt.clf()
+        return
+    df["no_prior"] = df["no_prior"].fillna(False).astype(bool)
+
+    batch_sz = int(df["batch_size"].iloc[0]) if "batch_size" in df.columns else 1
+    df["eff_t"] = (df["known_t_amount"] * batch_sz) // 100
+    df["eff_mask"] = (df["known_mask_amount"] * batch_sz) // 100
+
+    agg = df.groupby(["no_prior", "eff_t", "eff_mask"])[metric].mean()
+    if False not in agg.index.get_level_values("no_prior") or True not in agg.index.get_level_values("no_prior"):
+        print(f"plot_known_tm_prior_1: need both prior on/off rows for {data}, skipping")
+        plt.clf()
+        return
+    piv_with = agg.loc[False].unstack("eff_mask")
+    piv_no = agg.loc[True].unstack("eff_mask")
+    delta = piv_with - piv_no
+
+    eff_labels = {0: "none", 1: "all"}
+    fmt = ".1f" if is_pct else ".2f"
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    vmin = float(min(piv_with.min().min(), piv_no.min().min()))
+    vmax = float(max(piv_with.max().max(), piv_no.max().max()))
+    for ax, piv, title in [
+        (axes[0], piv_with, "With prior"),
+        (axes[1], piv_no, "No prior"),
+    ]:
+        sns.heatmap(piv, ax=ax, annot=True, fmt=fmt, cmap=COLOR_MAP_HEATMAP, vmin=vmin, vmax=vmax)
+        if is_pct:
+            for text in ax.texts:
+                text.set_text(text.get_text() + "%")
+        ax.set_title(title)
+        ax.set_xlabel("Known mask samples")
+        ax.set_ylabel("Known t samples")
+        ax.set_xticklabels([eff_labels.get(int(c), str(c)) for c in piv.columns], rotation=0)
+        ax.set_yticklabels([eff_labels.get(int(i), str(i)) for i in piv.index], rotation=0)
+    delta_abs_max = float(max(abs(delta.min().min()), abs(delta.max().max()), 1e-9))
+    sns.heatmap(
+        delta,
+        ax=axes[2],
+        annot=True,
+        fmt=fmt if not is_pct else "+.1f",
+        cmap="RdBu_r",
+        center=0,
+        vmin=-delta_abs_max,
+        vmax=delta_abs_max,
+    )
+    axes[2].set_title("Δ (prior contribution)")
+    axes[2].set_xlabel("Known mask samples")
+    axes[2].set_ylabel("Known t samples")
+    axes[2].set_xticklabels([eff_labels.get(int(c), str(c)) for c in delta.columns], rotation=0)
+    axes[2].set_yticklabels([eff_labels.get(int(i), str(i)) for i in delta.index], rotation=0)
+    save_fig(fig_path(out_dir, f"{metric}_known_tm_prior_1", data))
+
+
 def plot_known_tnm(df, data, metric, out_dir):
     """Small-multiples: one (known_t x known_noise) heatmap per known_mask level."""
     is_pct = metric in PERCENT_METRICS
@@ -806,7 +903,7 @@ def plot_pool_size(df, data, metric, out_dir):
     except FileNotFoundError:
         pass
     
-    # even pool sizes are excluded (the per-feature median is ambiguous for even pools)
+    # if data point at 2, 4, 8 exist, remove as it's useless
     df = df[df["pool_size"] != 2]
     df = df[df["pool_size"] != 4]
     df = df[df["pool_size"] != 8]
@@ -972,10 +1069,7 @@ def build_latex_table(methods, datasets, batch_sizes):
     n_cols = len(datasets) + 2
     col_spec = "cl" + "c" * len(datasets)
     header_cells = " & ".join(f"\\textbf{{{d.capitalize()}}}" for d in datasets)
-    has_baselines = any(m in BASELINE_METHODS for m in methods)
-    has_random = any(m in RANDOM_METHODS for m in methods)
-    last_baseline = BASELINE_METHODS[-1] if has_baselines else None
-    last_random = RANDOM_METHODS[-1] if has_random else None
+    last_reference = next((m for m in reversed(methods) if m not in OUR_METHODS), None)
     lines = [
         f"\\begin{{tabular}}{{{col_spec}}}",
         "\\hline",
@@ -987,7 +1081,7 @@ def build_latex_table(methods, datasets, batch_sizes):
             placeholders = " & ".join(["{}"] * len(datasets))
             label = "\\name 1-epoch" if method == NAME else method.replace(NAME, "\\name")
             row = f"& {label} & {placeholders} \\\\"
-            if method == last_baseline or method == last_random:
+            if method == last_reference:
                 row += f" \\cdashline{{2-{n_cols}}}"
             lines.append(row)
         lines.append("\\hline")
@@ -1016,7 +1110,7 @@ def print_latex_tables(table_metrics):
             tmp = table_metrics[(metric, diff_type)]
 
             for batch_size in BATCH_SIZES:
-                for data in DATASETS:
+                for data in ACCURACY_DATASETS:
                     best_score, best_method = None, None
                     for method in methods:
                         score_dict, _ = tmp[method].get(data, ({}, {}))
@@ -1038,17 +1132,15 @@ def print_latex_tables(table_metrics):
             data_values = []
             for batch_size in BATCH_SIZES:
                 for method in methods:
-                    for data in DATASETS:
+                    for data in ACCURACY_DATASETS:
                         score_dict, std_dict = tmp[method].get(data, ({}, {}))
+                        score = score_dict.get(batch_size)
                         data_values.append(
-                            format_cell(
-                                score_dict.get(batch_size, 0),
-                                std_dict.get(batch_size, 0),
-                                metric in PERCENT_METRICS,
-                            )
+                            format_cell(score, std_dict.get(batch_size, 0), metric in PERCENT_METRICS)
+                            if score is not None else "--"
                         )
 
-            print(build_latex_table(methods, DATASETS, BATCH_SIZES).format(*data_values))
+            print(build_latex_table(methods, ACCURACY_DATASETS, BATCH_SIZES).format(*data_values))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -1066,12 +1158,16 @@ EXPERIMENT_PLOTTERS = {
     "known-mask": plot_known_mask,
     "known-tm": plot_known_tm,
     "known-tm-prior": plot_known_tm_prior,
+    "known-tm-prior-1": plot_known_tm_prior_1,
     "known-tnm": plot_known_tnm,
     "pool-size": plot_pool_size,
     "pool-size-perfect": plot_pool_size,
     "defense": plot_defense,
     "init-strategy": plot_init_strategy,
     "latent-reconstruction": plot_latent_reconstruction,
+    "pool-size-8": plot_pool_size,
+    "interepoch-8": plot_interepoch,
+    "interepoch-8-2": plot_interepoch,
 }
 
 
@@ -1098,7 +1194,7 @@ def main():
             exp_dir = os.path.join(BASE_DIR, experiment)
             data_dir = os.path.join(DATA_BASE_DIR, experiment)
 
-            for data in DATASETS:
+            for data in ACCURACY_DATASETS if experiment == "accuracy" else DATASETS:
                 print(f"{experiment} - {data}")
                 out_dir = os.path.join(exp_dir, data)
 
@@ -1109,7 +1205,8 @@ def main():
                 except FileNotFoundError:
                     if experiment == "accuracy":
                         try:
-                            df = load_csv(f"{DATA_BASE_DIR}/{MULTI_EPOCH_ACC}/{data}/performance_{data}.csv")
+                            epoch_experiment = CENSUS_EPOCH_ACCURACY[1] if data == "census" else MULTI_EPOCH_ACC
+                            df = load_csv(f"{DATA_BASE_DIR}/{epoch_experiment}/{data}/performance_{data}.csv")
                             df = df[df["epoch"] == 0]
                             os.makedirs(out_dir, exist_ok=True)
                         except FileNotFoundError as e:
@@ -1119,6 +1216,8 @@ def main():
                         continue
 
                 apply_column_transforms(df)
+                if experiment == "accuracy" and data == "census":
+                    df = load_census_epochs().query("epoch == 0").copy()
 
                 # skip time metrics except for interepoch
                 if metric in TIME_METRICS and not experiment.startswith("interepoch"):

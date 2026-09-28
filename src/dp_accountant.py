@@ -1,6 +1,6 @@
 """Self-contained (eps, delta)-DP accountant for the Gaussian mechanism.
 
-Used by the DP-SGD defense (`src.defense.dp_sgd_gradient`). Needs no opacus / dp-accounting install
+Used by the DP-SGD defense (rebuttal 8B8y-Q1). Needs no opacus / dp-accounting install
 (numpy + scipy.special only, both already project dependencies).
 
 Model: each released gradient is a Gaussian mechanism applied to a sum of per-example gradients
@@ -18,8 +18,8 @@ Two accountants, dispatched by `get_epsilon` / `get_noise_multiplier` on `steps`
 
 We deliberately do NOT claim privacy amplification by subsampling (i.e. we take sampling rate q = 1).
 This is the conservative choice: the reported epsilon is an UPPER bound on the true privacy loss, so
-the defense is, if anything, under-credited. If the client Poisson-subsamples its local data, the
-true epsilon is smaller (stronger privacy).
+the "how much DP is needed" story is honest -- if anything we under-credit the defense. If the client
+Poisson-subsamples its local data, the true epsilon would be smaller (stronger privacy).
 
 References: Mironov, "Renyi Differential Privacy" (2017); Balle & Wang, "Improving the Gaussian
 Mechanism for Differential Privacy" (ICML 2018), Eq. (6): for sensitivity/noise ratio mu = 1/z,
@@ -76,7 +76,7 @@ def analytic_gaussian_epsilon(noise_multiplier, delta, iters=200):
     """EXACT epsilon for ONE Gaussian mechanism release at the given delta (Balle & Wang 2018).
 
     delta(eps) is continuous and strictly decreasing in eps, so binary-search eps. Strictly tighter
-    than the RDP route; use for steps == 1 only.
+    than the RDP route (~20-35% at typical z); use for steps == 1 only.
     """
     z = float(noise_multiplier)
     if z <= 0:
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     classical = np.sqrt(2 * np.log(1.25 / 1e-5)) / 1.0
     print(f"[check] sigma=1, T=1, delta=1e-5: exact eps={e_exact:.3f}  RDP={e_rdp:.3f}  classical~={classical:.3f}")
     assert e_exact < e_rdp and e_exact < classical
-    # (2) exact <= RDP across a z grid, including the tiny-z / huge-eps regime
+    # (2) exact <= RDP across the sweep's z grid, including the tiny-z / huge-eps regime
     for z in (0.003, 0.01, 0.07, 0.3, 0.69, 2.0, 10.0):
         assert analytic_gaussian_epsilon(z, 1e-5) <= rdp_to_epsilon(1e-5, z, 1) + 1e-9, z
     print("[check] exact <= RDP on z grid OK")

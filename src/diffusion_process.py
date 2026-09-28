@@ -160,7 +160,9 @@ class GaussianDiffusionProcess(DiffusionProcess):
             )
         else:
             self.noise_lr_mult = requested_noise_lr_mult
-        # Timestep learning-rate multiplier (default 10x), set independently of the noise one.
+        # Same knob for the timestep optimizer, which has always been hardcoded at 10x. The
+        # noise multiplier turned out to matter a lot on the transformer, and t is the other
+        # nuisance latent, so it is worth being able to condition it independently.
         requested_t_lr_mult = getattr(args, "t_lr_mult", None)
         self.t_lr_mult = 10.0 if requested_t_lr_mult is None else requested_t_lr_mult
 
@@ -295,9 +297,9 @@ class GaussianDiffusionProcess(DiffusionProcess):
         dummy_t = dummy_latents["t"]
         dummy_noise = dummy_latents["noise"]
         # Linear interpolation over alpha_bars so gradient flows back to dummy_t
-        # through x_noised. alpha_bars[round(t)] would kill this gradient (integer
-        # indexing is non-differentiable), leaving only a weak second-order signal
-        # from model(x_noised, t) via the time embedding.
+        # through x_noised. Using alpha_bars[round(t)] (the old path) kills this
+        # gradient because integer indexing is non-differentiable, leaving only
+        # a weak 2nd-order signal from model(x_noised, t) via time embedding.
         alpha_bar = self._interp_timewise(self.alpha_bars, dummy_t)
         coeff_1 = torch.sqrt(alpha_bar).reshape((batch_size, 1))
         coeff_2 = torch.sqrt(1 - alpha_bar).reshape((batch_size, 1))
@@ -496,7 +498,15 @@ class MaskedDiffusionProcess(DiffusionProcess):
         B, D = batch.shape
         t = torch.randint(self.T, size=(B,)).to(device)
         noise = torch.normal(0, 1, size=(B, self.n_cont)).to(device)
-        # Each categorical column is masked independently with probability gamma = 1 - alpha_bar(t).
+        # gamma = (t.float() + 1) / self.T  # masking probability per sample
+        """
+
+        prob_i = torch.zeros(batch.shape[0], 2, device=batch.device)
+                prob_i[:, 0] = alpha_bars[timesteps]
+                prob_i[:, 1] = 1 - alpha_bars[timesteps]
+                log_prob_i = torch.log(prob_i)
+                soft_sample_i = F.gumbel_softmax(log_prob_i, tau=0.01, hard=True)
+        """
         gamma = 1 - self.alpha_bars[t]
         probs = gamma.unsqueeze(1).expand(B, len(self.n_cats))
         mask = torch.bernoulli(probs).to(device)  # 1 = masked, 0 = kept
@@ -566,7 +576,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
         w_t = self.elbo_weights[latents["t"]].unsqueeze(1)  # (B, 1)
         weighted_ce = per_sample_feature_ce * mask * w_t  # (B, C)
 
-        # Average over all (B, C) cells.
+        # A flat .mean() computes (sum over B and C) / (B * C), perfectly matching your original loop logic
         cat_loss = weighted_ce.mean()
 
         return cont_loss + cat_loss
@@ -624,7 +634,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
         i = torch.arange(optim_iters, dtype=torch.float32)
         schedule = torch.zeros(optim_iters, dtype=torch.float32)
         
-        # Warmup: schedule stays at 0.
+        # Warmup is natively 0.0
         
         # Linear Ramp
         ramp_mask = (i >= warmup_end) & (i < peak_start)
@@ -709,7 +719,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
         random perturbation around 0 to break symmetry across the batch (prevents
         collapsed mid-value stall under permutation-invariant gradient matching).
         Random-mask baseline path (frozen mask) uses very large logits so sigmoid stays
-        near 0/1 even under the initial mask temperature.
+        near 0/1 even under the initial mask temperature (~20).
         """
         mask_nan_mask = torch.isnan(known_mask)
         mask_logits = torch.where(
@@ -792,7 +802,8 @@ class MaskedDiffusionProcess(DiffusionProcess):
         t = dummy_latents['t']
         # Differentiable alpha_bar(t) via linear interpolation so the forward
         # diffusion (x_cont_noised below) carries gradient back to dummy_t.
-        # Integer indexing (alpha_bars[round(t)]) would cut this gradient path.
+        # Without this, coeff_1/coeff_2 would come from alpha_bars[round(t)],
+        # which is integer-indexed and cuts the gradient path entirely.
         alpha_bar = self._interp_timewise(self.alpha_bars, t)
         self._cached_alpha_bar = alpha_bar
         noise = dummy_latents['noise']
@@ -850,7 +861,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
         hard_cat.scatter_(-1, gathered_soft_masked.argmax(dim=-1, keepdim=True), 1.0)
         
         cat_target = hard_cat + gathered_soft - gathered_soft.detach()
-        # Zero padded targets.
+        # Clean up padded targets just in case
         cat_target = cat_target.masked_fill(~pad_mask_ext, 0.0)
 
         per_sample_feature_ce = -torch.sum(cat_target * log_probs, dim=-1)  # (B, C)
@@ -888,8 +899,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
 
         # Rank-align the two batch distributions. sort preserves gradients through
         # the permuted values, so sorted_q still differentiates into t_b.
-        # By the rearrangement inequality this is 1-D optimal-transport (Wasserstein-2-like)
-        # matching between the two distributions.
+        # By the 1-D rearrangement inequality this is equivalent to 1-D optimal-transport (Wasserstein-2-like) matching between the two 1-D distributions.
         sorted_p, _ = torch.sort(p_b)
         sorted_q, _ = torch.sort(gamma_b)
 
@@ -959,7 +969,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
         metrics["t_mae"] = (real_t - pred_t).abs().mean().item()
 
         real_mask = real_latents["mask"].cpu()
-        # Score the hardened mask the attack returns at its final temperature, not raw logits.
+        # evaluate what is fully returned at the end of the attack, not the underlying mask_logits which may be at an intermediate temperature
         pred_mask = (
             torch.sigmoid(dummy_latents["mask_logits"].detach().cpu() / max(self.mask_temperature, 1e-6)) > 0.5
         ).float()
@@ -991,7 +1001,7 @@ class MaskedDiffusionProcess(DiffusionProcess):
             params.append(dummy_latents["t"])
         if self.optimize_mask:
             params.append(dummy_latents["mask_logits"])
-        if self.optimize_noise:
+        if self.optimize_noise:  # same flag as mask in practice
             params.append(dummy_latents["noise"])
         return params
 

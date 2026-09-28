@@ -1,5 +1,5 @@
 import numpy as np
-SIGMA_CONSTANT = 0.319  # numerical tolerance factor (x feature std) from the TabLeak paper
+SIGMA_CONSTANT = 0.319  # from tableak paper
 
 
 class TableakSimilarity:
@@ -15,14 +15,15 @@ class TableakSimilarity:
         self.total_cols = len(self.cat_cols) + len(self.num_cols)
         # Per-categorical-column cardinality, aligned with self.cat_cols (the one-hot encoder
         # is fit on df[cat_cols], so categories_ preserves that order). Used to bin categorical
-        # reconstruction accuracy by cardinality.
+        # reconstruction accuracy by cardinality (rebuttal 2.1).
         ohe = getattr(processor, "OneHotEncoder", None)
         if ohe is not None and hasattr(ohe, "categories_"):
             self.cat_cardinalities = [len(c) for c in ohe.categories_]
         else:
             self.cat_cardinalities = [0] * len(self.cat_cols)
 
-    # Cardinality bin edges: low <=4, medium 5-9, high >=10.
+    # Cardinality bin edges (rebuttal 2.1): low <=4, medium 5-9, high >=10.
+    # Covers the reviewer's "high >10 / med 5-9 / low <4" with the boundary values assigned.
     def _cardinality_bin(self, card):
         if card <= 4:
             return "low"
@@ -83,9 +84,8 @@ class TableakSimilarity:
           - per-cardinality categorical accuracy: cat_high/medium/low_score (None if the bin
             is empty for this dataset),
           - whole_row_acc: fraction of rows where EVERY cell is correct (cat exact + cont
-            within tolerance) -- a strict record-level reconstruction metric,
-          - near_row_80 / near_row_90: fraction of rows with at least 80% / 90% of cells correct,
-          - per_column: {column_name -> per-row match rate} for every column.
+            within tolerance) -- a strict record-level reconstruction metric (rebuttal 2.3),
+          - per_column: {column_name -> per-row match rate} for every column (rebuttal 2.2).
         """
         num_recon = batch_recon[self.num_cols].values.astype(np.float64)
         num_orig = batch_orig[self.num_cols].values.astype(np.float64)
@@ -119,7 +119,7 @@ class TableakSimilarity:
             row_all = cont_match
         whole_row_acc = float(row_all.all(axis=1).mean()) if row_all.shape[0] else 0.0
         # bridging metrics between whole-row (all cells) and mean per-cell accuracy:
-        # fraction of records with at least 80% / 90% of cells correct.
+        # fraction of records with at least 80% / 90% of cells correct (rebuttal 2.3).
         if row_all.shape[0]:
             frac_correct = row_all.mean(axis=1)  # per-record fraction of cells correct
             near_row_80 = float((frac_correct >= 0.8).mean())
@@ -138,7 +138,7 @@ class TableakSimilarity:
         }
 
     def reidentification_rate(self, batch_recon, batch_orig):
-        """Nearest-neighbour re-identification rate.
+        """Nearest-neighbour re-identification rate (rebuttal 2.3 / 8B8y re-id risk).
 
         For each reconstructed row, find its most-similar original row over the FULL batch;
         count a hit when that nearest neighbour is the row's own aligned match (index i).

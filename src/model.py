@@ -54,7 +54,7 @@ class MLPDiffusion(nn.Module):
 
 
 class FTTransformerDiffusion(nn.Module):
-    """FT-Transformer-style diffusion denoiser (alternative backbone to MLPDiffusion).
+    """FT-Transformer-style diffusion denoiser (rebuttal: architecture generalization, 8B8y/6bVX).
 
     Same interface as MLPDiffusion: forward(x, timesteps) -> (B, d_out). Each input scalar feature is
     tokenized to a d_model vector (FT-Transformer numerical feature tokenizer), a timestep embedding is
@@ -93,7 +93,7 @@ class FTTransformerDiffusion(nn.Module):
         # feat_init_std must be large enough that the input-token contribution (x_i * W_i) is
         # comparable to the timestep embedding added to every token; too small (e.g. 0.02) drowns
         # continuous inputs under the timestep signal so the model ignores them and the attack cannot
-        # invert continuous features.
+        # invert continuous features (rebuttal FT-Transformer diagnosis).
         self.feat_weight = nn.Parameter(torch.randn(d_in, d_model) * feat_init_std)
         # The bias must be RANDOM per feature, not zeros. With a zero bias, token_i = x_i * W_i,
         # so every feature whose value is 0 yields the identical (zero) token and the encoder cannot

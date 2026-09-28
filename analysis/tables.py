@@ -39,9 +39,11 @@ def tab_fedavg() -> pd.DataFrame:
         rec = {"dataset": ds, "diffusion": dt, "subset": b}
         for k in (1, 2, 4, 8):
             sub = cell[cell.fedavg_local_steps == k]["tableak_score"]
-            # ddof=1 (sample std, pandas default), as in the paper. The leakage/cardinality/
-            # sensitive tables use ddof=0 (numpy default) instead; the two conventions differ by
-            # sqrt(n/(n-1)), which is visible in the third decimal at n=3.
+            # ddof=1 (sample std) to match the published table, which was produced with
+            # pandas .std() defaults. The leakage/cardinality/sensitive tables use ddof=0
+            # (numpy default) instead -- the two conventions differ by sqrt(n/(n-1)) = 1.22 at
+            # n=3, which is visible in the third decimal. Do not "harmonise" them without
+            # re-blessing the fixtures and updating the paper.
             rec[f"K={k}"] = f"{sub.mean():.3f} +- {sub.std(ddof=1):.3f}" if len(sub) else "-"
         rows.append(rec)
     out = pd.DataFrame(rows)
@@ -56,7 +58,7 @@ def _leakage_runs(df: pd.DataFrame, batch: int, diffusion: str, metric: str, n_r
         vals = []
         for ds in LEAKAGE_DATASETS:
             cell = df[(df.dataname == ds) & (df.batch_size == batch) & (df.diffusion_type == diffusion)]
-            runs = L.split_seed_runs(cell, L.ROWS_PER_RUN_LEAKAGE_METRICS[batch], n_runs=n_runs)
+            runs = L.split_seed_runs(cell, L.ROWS_PER_RUN_REBUTTAL_METRICS[batch], n_runs=n_runs)
             if len(runs) > r and metric in runs[r]:
                 v = runs[r][metric].dropna()
                 if len(v):
@@ -67,7 +69,7 @@ def _leakage_runs(df: pd.DataFrame, batch: int, diffusion: str, metric: str, n_r
 
 
 def tab_leakage(n_runs: int = 3) -> pd.DataFrame:
-    df = L.load_experiment("leakage-metrics")
+    df = L.load_experiment("rebuttal-metrics")
     rows = []
     for dt in ("gaussian", "masked"):
         for b in (1, 8, 32):
@@ -87,12 +89,13 @@ def tab_leakage(n_runs: int = 3) -> pd.DataFrame:
 # ── 3. Census vs adult (many-category scalability) ───────────────────────────
 def tab_census() -> pd.DataFrame:
     b18 = L.load_experiment("accuracy-epochX-census-b18")
+    b16 = L.load_experiment("accuracy-epochX-census-b16")
     b32 = L.load_experiment("accuracy-epochX-census")
     adult = L.load_experiment("accuracy-epochX")
     adult = adult[adult.dataname == "adult"]
     rows = []
-    for b in (1, 8, 32):
-        src = b32 if b == 32 else b18
+    for b in (1, 8, 16, 32):
+        src = b32 if b == 32 else b16 if b == 16 else b18
         rec = {"batch": b}
         for dt, lab in (("gaussian", "gaussian"), ("masked", "mixed")):
             c = src[(src.batch_size == b) & (src.diffusion_type == dt) & (src.epoch == 4)]
@@ -162,11 +165,11 @@ CARD_COLS = [("tableak_cat_low_score", "categorical low (<=4)"),
 
 
 def tab_cardinality(n_runs: int = 3) -> pd.DataFrame:
-    df = L.load_experiment("leakage-metrics")
+    df = L.load_experiment("rebuttal-metrics")
     rows = []
     for ds in ["adult", "magic", "gesture", "letter", "abalone"]:
         cell = df[(df.dataname == ds) & (df.batch_size == 1) & (df.diffusion_type == "gaussian")]
-        runs = L.split_seed_runs(cell, L.ROWS_PER_RUN_LEAKAGE_METRICS[1], n_runs=n_runs)
+        runs = L.split_seed_runs(cell, L.ROWS_PER_RUN_REBUTTAL_METRICS[1], n_runs=n_runs)
         rec = {"dataset": ds}
         for col, name in CARD_COLS:
             vals = [r[col].dropna().mean() for r in runs if col in r and r[col].notna().any()]
@@ -186,7 +189,7 @@ def tab_cardinality(n_runs: int = 3) -> pd.DataFrame:
 
 
 def tab_cardinality_batch(n_runs: int = 3) -> pd.DataFrame:
-    df = L.load_experiment("leakage-metrics")
+    df = L.load_experiment("rebuttal-metrics")
     rows = []
     for b in (1, 8, 32):
         rec = {"batch": b}
@@ -289,9 +292,9 @@ SENSITIVE = ["pcol_race", "pcol_sex", "pcol_marital-status", "pcol_native-countr
 
 
 def tab_sensitive(n_runs: int = 3) -> pd.DataFrame:
-    df = L.load_experiment("leakage-metrics")
+    df = L.load_experiment("rebuttal-metrics")
     cell = df[(df.dataname == "adult") & (df.batch_size == 32) & (df.diffusion_type == "gaussian")]
-    runs = L.split_seed_runs(cell, L.ROWS_PER_RUN_LEAKAGE_METRICS[32], n_runs=n_runs)
+    runs = L.split_seed_runs(cell, L.ROWS_PER_RUN_REBUTTAL_METRICS[32], n_runs=n_runs)
     rows = []
     for col in SENSITIVE + ["tableak_score"]:
         vals = [r[col].dropna().mean() for r in runs if col in r and r[col].notna().any()]
@@ -320,10 +323,11 @@ def tab_alignment() -> pd.DataFrame:
 
 # ── 12/13. FT-Transformer versus MLP ────────────────────────────────────────
 def _ft_cells() -> pd.DataFrame:
-    # The FT numbers use the loss_fn="auto" configs only. The registered ft-transformer-v2
-    # experiment ALSO defines loss_fn="both" configs, and because this function aggregates over
-    # whatever rows exist at batch 32, running the full experiment would otherwise fold a
-    # DIFFERENT loss configuration into the mean rather than adding a seed.
+    # The published FT numbers come from the loss_fn="auto" configs only -- that is all the
+    # committed sweep contains. The registered ft-transformer-v2 experiment ALSO defines
+    # loss_fn="both" configs, and because this function aggregates over whatever rows exist at
+    # batch 32, running the full experiment would silently fold a DIFFERENT loss configuration
+    # into the published mean rather than adding a seed. Filtering here makes that impossible.
     ft = L.load_experiment("ft-transformer-v2")
     ft = ft[ft.loss_fn == "auto"]
     mlp = L.load_experiment("accuracy-epochX")
