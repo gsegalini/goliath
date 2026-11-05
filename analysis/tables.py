@@ -109,9 +109,12 @@ def tab_census() -> pd.DataFrame:
 # ── 4/5. Adaptive TabLeak ────────────────────────────────────────────────────
 def _tableak_cells() -> pd.DataFrame:
     adaptive = L.load_experiment("tableak-adaptive")
-    goliath = L.load_experiment("accuracy-epochX")
+    # Census ran as its own sweeps (one directory per batch-size protocol), not in accuracy-epochX.
+    goliath = pd.concat([L.load_experiment(e) for e in (
+        "accuracy-epochX", "accuracy-epochX-census-b18", "accuracy-epochX-census-b16", "accuracy-epochX-census",
+    )])
     rows = []
-    for ds in DATASETS_9:
+    for ds in DATASETS_9 + ["census"]:
         for b in (1, 8, 16, 32):
             for dt in ("gaussian", "masked"):
                 a = adaptive[(adaptive.dataname == ds) & (adaptive.batch_size == b) & (adaptive.diffusion_type == dt)]
@@ -379,7 +382,7 @@ TABLES: dict[str, Spec] = {
     "fedavg": Spec(tab_fedavg, "Accumulated FedAvg updates ($K$ local steps) versus single-gradient inversion. Mean $\\pm$ std over 3 seeds.", "tab:fedavg", "main"),
     "leakage": Spec(tab_leakage, "Whole-row exact reconstruction, near-row thresholds and nearest-neighbour re-identification, averaged over five datasets. Percentages, mean $\\pm$ std over 3 seeds.", "tab:leakage", "main"),
     "census": Spec(tab_census, "Census-Income (KDD) versus adult after 5 epochs; Census carries 34 categorical columns against adult's 9.", "tab:census", "main"),
-    "tableak_summary": Spec(tab_tableak_summary, "GOLIATH versus the adaptive TabLeak baseline over 9 datasets $\\times$ 4 batch sizes $\\times$ 2 diffusion types.", "tab:tableak-summary", "main"),
+    "tableak_summary": Spec(tab_tableak_summary, "GOLIATH versus the adaptive TabLeak baseline over 10 datasets $\\times$ 4 batch sizes $\\times$ 2 diffusion types.", "tab:tableak-summary", "main"),
     "tableak_perdataset": Spec(tab_tableak_perdataset, "GOLIATH versus adaptive TabLeak per dataset, averaged over batch sizes and diffusion types. ``Worst cell'' is the smallest gap over that dataset's eight cells.", "tab:tableak-perdataset"),
     "cardinality": Spec(tab_cardinality, "Reconstruction accuracy by feature type and categorical cardinality (batch 1, gaussian). Percentages, mean $\\pm$ std over 3 seeds.", "tab:cardinality", "main"),
     "cardinality_batch": Spec(tab_cardinality_batch, "Cardinality-bin accuracy as the batch grows, pooled over the same five datasets.", "tab:cardinality-batch"),

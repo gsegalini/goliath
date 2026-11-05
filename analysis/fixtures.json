@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "blessed": "2026-09-28",
+    "blessed": "2026-11-05",
     "note": "Pinned published values. Regenerate with: uv run analysis/build.py --update-fixtures",
     "tolerance": 0.0005
   },
@@ -242,6 +242,10 @@
     "bean|adaptive TabLeak": "0.380",
     "bean|gap": "+16.7pp",
     "bean|worst cell": "+12.0pp",
+    "census|GOLIATH": "0.640",
+    "census|adaptive TabLeak": "0.480",
+    "census|gap": "+16.0pp",
+    "census|worst cell": "+2.3pp",
     "credit|GOLIATH": "0.635",
     "credit|adaptive TabLeak": "0.515",
     "credit|gap": "+12.0pp",
@@ -268,20 +272,20 @@
     "shoppers|worst cell": "+4.3pp"
   },
   "tableak_summary": {
-    "all|GOLIATH-adaptive (multi)": "+14.4pp",
-    "all|GOLIATH-adaptive (single)": "+7.1pp",
-    "all|cells": "72",
-    "all|wins (multi)": "72/72",
-    "all|wins (single)": "70/72",
-    "gaussian|GOLIATH-adaptive (multi)": "+15.0pp",
-    "gaussian|GOLIATH-adaptive (single)": "+8.7pp",
-    "gaussian|cells": "36",
-    "gaussian|wins (multi)": "36/36",
-    "gaussian|wins (single)": "34/36",
-    "masked|GOLIATH-adaptive (multi)": "+13.9pp",
-    "masked|GOLIATH-adaptive (single)": "+5.4pp",
-    "masked|cells": "36",
-    "masked|wins (multi)": "36/36",
-    "masked|wins (single)": "36/36"
+    "all|GOLIATH-adaptive (multi)": "+14.6pp",
+    "all|GOLIATH-adaptive (single)": "+7.0pp",
+    "all|cells": "80",
+    "all|wins (multi)": "80/80",
+    "all|wins (single)": "74/80",
+    "gaussian|GOLIATH-adaptive (multi)": "+16.2pp",
+    "gaussian|GOLIATH-adaptive (single)": "+9.7pp",
+    "gaussian|cells": "40",
+    "gaussian|wins (multi)": "40/40",
+    "gaussian|wins (single)": "38/40",
+    "masked|GOLIATH-adaptive (multi)": "+13.0pp",
+    "masked|GOLIATH-adaptive (single)": "+4.3pp",
+    "masked|cells": "40",
+    "masked|wins (multi)": "40/40",
+    "masked|wins (single)": "36/40"
   }
 }

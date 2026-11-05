@@ -592,7 +592,8 @@ def plot_ablation_loss(df, data, metric, out_dir):
 
 def plot_ablation_prior(df, data, metric, out_dir):
     sns.set_palette(COLOR_PALETTE_LINES)
-    df = df.copy()
+    # Adult's CSV also holds earlier cossim rows; the ablation compares the default loss only.
+    df = df[df["loss_fn"] == "auto"].copy()
     df["prior_label"] = df["no_prior"].map({False: "With Prior", True: "No Prior"})
     df["prior_label"] = pd.Categorical(df["prior_label"], categories=["With Prior", "No Prior"], ordered=True)
 
